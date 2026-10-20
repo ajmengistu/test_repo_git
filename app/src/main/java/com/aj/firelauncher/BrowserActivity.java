@@ -210,7 +210,14 @@ public class BrowserActivity extends Activity {
         s.setLoadWithOverviewMode(true);
         String ua = s.getUserAgentString();
         if (ua != null) {
-            s.setUserAgentString(ua.replace("; wv)", ")").replace("Version/4.0 ", ""));
+            ua = ua.replace("; wv)", ")").replace("Version/4.0 ", "");
+            if (!ua.contains("Mobile Safari")) {
+                ua = ua.replace("Safari/", "Mobile Safari/");
+            }
+            if (!ua.contains("OPR/")) {
+                ua = ua + " OPR/114.0.0.0";
+            }
+            s.setUserAgentString(ua);
         }
 
         webView.setWebChromeClient(new WebChromeClient() {
@@ -289,7 +296,9 @@ public class BrowserActivity extends Activity {
 
             @Override
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                if (aggressive && isBlocked(request.getUrl().getHost())) {
+                Uri reqUri = request.getUrl();
+                String path = reqUri.getPath();
+                if (aggressive && (isBlocked(reqUri.getHost()) || "/ad.html".equals(path))) {
                     return new WebResourceResponse(
                             "text/plain",
                             "UTF-8",
