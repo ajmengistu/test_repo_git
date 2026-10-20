@@ -43,6 +43,24 @@ public class BrowserActivity extends Activity {
             "googleadservices.com",
             "adservice.google.com",
             "adsystem.com",
+            "amazon-adsystem.com",
+            "aan.amazon.com",
+            "assoc-amazon.com",
+            "fls-na.amazon.com",
+            "fls-eu.amazon.com",
+            "unagi.amazon.com",
+            "unagi-na.amazon.com",
+            "moatads.com",
+            "2mdn.net",
+            "rubiconproject.com",
+            "pubmatic.com",
+            "casalemedia.com",
+            "criteo.com",
+            "criteo.net",
+            "adsrvr.org",
+            "demdex.net",
+            "omtrdc.net",
+            "serving-sys.com",
             "adnxs.com",
             "taboola.com",
             "outbrain.com",
@@ -318,7 +336,9 @@ public class BrowserActivity extends Activity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 Uri reqUri = request.getUrl();
                 String path = reqUri.getPath();
-                if (aggressive && (isBlocked(reqUri.getHost()) || "/ad.html".equals(path))) {
+                boolean adPath = path != null && ("/ad.html".equals(path)
+                        || path.startsWith("/ads/") || path.startsWith("/aan/"));
+                if (aggressive && (isBlocked(reqUri.getHost()) || adPath)) {
                     return new WebResourceResponse(
                             "text/plain",
                             "UTF-8",
@@ -455,8 +475,21 @@ public class BrowserActivity extends Activity {
         unsandboxIframes(view);
         view.evaluateJavascript(
                 "(function(){" +
+                "var AD_SEL='#top_ad,#top_ad_wrapper,#bottom_ad_wrapper,[id^=\"inline\"][id$=\"_slot\"],[id^=\"inline10\"],[id^=\"inline20\"],[id^=\"inline30\"],[id^=\"inline40\"],[id^=\"inline50\"],[id*=\"nas-slot\"],[id*=\"nasa_slot\"],[class*=\"nas-slot\"],[class*=\"SlotWrapper\"],[data-testid*=\"nas-slot\"],[data-testid*=\"ad-slot\"],[data-testid*=\"sponsored\"],[data-testid*=\"promoted\"],div[class*=\"sponsored\"],section[class*=\"sponsored\"],aside div[class*=\"ad-\"],iframe[src*=\"amazon-adsystem\"],iframe[src*=\"aan.amazon\"],iframe[id*=\"ad_\"],iframe[title*=\"Advertisement\"],[aria-label=\"Sponsored\"],[aria-label=\"Advertisement\"]';" +
+                "if(!document.getElementById('__aj_ad_style')){" +
+                "var st=document.createElement('style');st.id='__aj_ad_style';" +
+                "st.textContent=AD_SEL+'{display:none !important;}';" +
+                "if(document.head)document.head.appendChild(st);}" +
                 "function clean(){" +
                 "try{" +
+                "document.querySelectorAll(AD_SEL).forEach(function(el){el.remove();});" +
+                "document.querySelectorAll('span,div,p,small').forEach(function(el){" +
+                "if(el.children.length>0)return;" +
+                "var tx=(el.innerText||'').trim().toLowerCase();" +
+                "if(tx==='sponsored'||tx==='sponsored content'||tx==='advertisement'){" +
+                "var box=el.closest('[data-testid*=\"slot\"],[class*=\"Slot\"],[class*=\"nas-\"],aside,section')||el.parentElement;" +
+                "if(box&&box.tagName!=='BODY'&&box.tagName!=='MAIN'&&box.getBoundingClientRect().height<520&&!box.querySelector('video')){" +
+                "box.remove();}}});" +
                 "document.querySelectorAll('div,section,aside,a').forEach(function(el){" +
                 "if(el.querySelector('video,iframe'))return;" +
                 "var t=(el.innerText||'').toLowerCase();" +
@@ -468,6 +501,7 @@ public class BrowserActivity extends Activity {
                 "el.remove();" +
                 "}});" +
                 "}catch(e){}}" +
+                "window.__ajCleanAds=clean;" +
                 "clean();setTimeout(clean,1500);setTimeout(clean,3500);" +
                 "})();", null);
     }
@@ -488,6 +522,7 @@ public class BrowserActivity extends Activity {
                 "window.__ajCur=el;" +
                 "if(el){el.classList.add('__aj_focus');try{el.focus({preventScroll:true});}catch(e){}el.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});}}" +
                 "window.__ajStep=function(d){" +
+                "if(window.__ajCleanAds)window.__ajCleanAds();" +
                 "var list=vis();if(!list.length){window.scrollBy(0,d*240);return 'SCROLL';}" +
                 "var idx=list.indexOf(window.__ajCur);" +
                 "if(idx===-1){" +
