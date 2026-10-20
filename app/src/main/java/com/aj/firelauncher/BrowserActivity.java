@@ -4,9 +4,12 @@ import android.app.Activity;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Message;
+import android.os.SystemClock;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -18,6 +21,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -63,6 +67,9 @@ public class BrowserActivity extends Activity {
     private WebView webView;
     private EditText address;
     private TextView shield;
+    private FrameLayout fullscreenContainer;
+    private View customView;
+    private WebChromeClient.CustomViewCallback customViewCallback;
     private boolean aggressive = true;
 
     @Override
@@ -163,7 +170,16 @@ public class BrowserActivity extends Activity {
         root.addView(webView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
-        setContentView(root);
+        FrameLayout wrapper = new FrameLayout(this);
+        wrapper.addView(root, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        fullscreenContainer = new FrameLayout(this);
+        fullscreenContainer.setBackgroundColor(Color.BLACK);
+        fullscreenContainer.setVisibility(View.GONE);
+        wrapper.addView(fullscreenContainer, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        setContentView(wrapper);
     }
 
     private TextView button(String label) {
@@ -200,16 +216,63 @@ public class BrowserActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture,
-                                          android.os.Message resultMsg) {
-                if (!aggressive && isUserGesture && view != null) {
+                                          Message resultMsg) {
+                if (resultMsg == null) {
+                    return false;
+                }
+                String currentUrl = view != null ? view.getUrl() : null;
+                String currentHost = currentUrl != null ? Uri.parse(currentUrl).getHost() : null;
+                boolean isDirectory = currentHost != null && (
+                        currentHost.equals("fmhy.net") || currentHost.endsWith(".fmhy.net")
+                        || currentHost.equals("search.brave.com"));
+                if ((!aggressive || isDirectory) && isUserGesture && view != null) {
                     WebView.HitTestResult hit = view.getHitTestResult();
                     if (hit != null && hit.getExtra() != null) {
                         view.loadUrl(hit.getExtra());
+                        return false;
                     }
-                } else if (isUserGesture) {
-                    toastBlocked();
                 }
-                return false;
+                // Create an invisible sink WebView so window.open() returns a real native
+                // Window object to stream players (preventing "Remove sandbox attributes"
+                // overlays) while discarding the popup ad in the background.
+                WebView sink = new WebView(BrowserActivity.this);
+                sink.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
+                        if (isDirectory && isUserGesture && req.getUrl() != null) {
+                            webView.loadUrl(req.getUrl().toString());
+                        }
+                        return true;
+                    }
+                });
+                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
+                transport.setWebView(sink);
+                resultMsg.sendToTarget();
+                webView.postDelayed(sink::destroy, 600);
+                return true;
+            }
+
+            @Override
+            public void onShowCustomView(View view, CustomViewCallback callback) {
+                if (customView != null) {
+                    callback.onCustomViewHidden();
+                    return;
+                }
+                customView = view;
+                customViewCallback = callback;
+                fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+                fullscreenContainer.setVisibility(View.VISIBLE);
+            }
+
+            @Override
+            public void onHideCustomView() {
+                if (customView == null) return;
+                fullscreenContainer.removeView(customView);
+                fullscreenContainer.setVisibility(View.GONE);
+                if (customViewCallback != null) customViewCallback.onCustomViewHidden();
+                customView = null;
+                customViewCallback = null;
             }
         });
 
@@ -236,18 +299,20 @@ public class BrowserActivity extends Activity {
             }
 
             @Override
+            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                address.setText(url);
+                unsandboxIframes(view);
+            }
+
+            @Override
+            public void onLoadResource(WebView view, String url) {
+                unsandboxIframes(view);
+            }
+
+            @Override
             public void onPageFinished(WebView view, String url) {
                 address.setText(url);
-                view.evaluateJavascript(
-                        "(function(){" +
-                        "try{" +
-                        "document.querySelectorAll('iframe[sandbox]').forEach(function(f){f.removeAttribute('sandbox');});" +
-                        "var h=location.hostname.toLowerCase();" +
-                        "if(h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com'){" +
-                        "document.querySelectorAll('a[target]').forEach(function(a){a.removeAttribute('target');});" +
-                        "}" +
-                        "}catch(e){}" +
-                        "})();", null);
+                unsandboxIframes(view);
                 if (aggressive) {
                     stripOverlays(view);
                 }
@@ -277,7 +342,20 @@ public class BrowserActivity extends Activity {
             }
             if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
                 if (event.getAction() == KeyEvent.ACTION_UP) {
-                    webView.evaluateJavascript("window.__ajClick && window.__ajClick(" + aggressive + ")", null);
+                    webView.evaluateJavascript("window.__ajClick ? window.__ajClick() : ''", result -> {
+                        if (result != null && result.startsWith("\"TAP:")) {
+                            String[] parts = result.replace("\"", "").substring(4).split(",");
+                            if (parts.length == 2) {
+                                try {
+                                    float density = getResources().getDisplayMetrics().density;
+                                    float x = Float.parseFloat(parts[0]) * density;
+                                    float y = Float.parseFloat(parts[1]) * density;
+                                    tapWebView(x, y);
+                                } catch (Exception ignored) {
+                                }
+                            }
+                        }
+                    });
                 }
                 return true;
             }
@@ -285,12 +363,46 @@ public class BrowserActivity extends Activity {
         });
     }
 
+    private void tapWebView(float x, float y) {
+        long now = SystemClock.uptimeMillis();
+        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);
+        MotionEvent up = MotionEvent.obtain(now, now + 40, MotionEvent.ACTION_UP, x, y, 0);
+        webView.dispatchTouchEvent(down);
+        webView.dispatchTouchEvent(up);
+        down.recycle();
+        up.recycle();
+    }
+
+    private void unsandboxIframes(WebView view) {
+        view.evaluateJavascript(
+                "(function(){" +
+                "try{" +
+                "if(!window.__ajPatchedSandbox){" +
+                "window.__ajPatchedSandbox=true;" +
+                "var origSet=Element.prototype.setAttribute;" +
+                "Element.prototype.setAttribute=function(n,v){" +
+                "if(this.tagName==='IFRAME'&&String(n).toLowerCase()==='sandbox')return;" +
+                "return origSet.call(this,n,v);};" +
+                "}" +
+                "document.querySelectorAll('iframe[sandbox]').forEach(function(f){" +
+                "var c=f.cloneNode(false);" +
+                "c.removeAttribute('sandbox');" +
+                "if(f.parentNode)f.parentNode.replaceChild(c,f);" +
+                "});" +
+                "var h=location.hostname.toLowerCase();" +
+                "if(h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com'){" +
+                "document.querySelectorAll('a[target]').forEach(function(a){a.removeAttribute('target');});" +
+                "}" +
+                "}catch(e){}" +
+                "})();", null);
+    }
+
     private void stripOverlays(WebView view) {
+        unsandboxIframes(view);
         view.evaluateJavascript(
                 "(function(){" +
                 "function clean(){" +
                 "try{" +
-                "document.querySelectorAll('iframe[sandbox]').forEach(function(f){f.removeAttribute('sandbox');});" +
                 "document.querySelectorAll('div,section,aside,a').forEach(function(el){" +
                 "if(el.querySelector('video,iframe'))return;" +
                 "var t=(el.innerText||'').toLowerCase();" +
@@ -314,9 +426,9 @@ public class BrowserActivity extends Activity {
                 "st.textContent='.__aj_focus{outline:3px solid #D8E8FF !important;outline-offset:2px !important;background-color:rgba(49,76,119,0.55) !important;border-radius:5px !important;}';" +
                 "document.head.appendChild(st);}" +
                 "function vis(){" +
-                "return Array.prototype.slice.call(document.querySelectorAll('a[href],button,input,summary,video,[role=button],[onclick],[class*=close],[class*=play]')).filter(function(el){" +
+                "return Array.prototype.slice.call(document.querySelectorAll('iframe,video,a[href],button,input,summary,[role=button],[onclick],[class*=close],[class*=play]')).filter(function(el){" +
                 "var r=el.getBoundingClientRect(),c=window.getComputedStyle(el);" +
-                "return r.width>4&&r.height>4&&c.visibility!=='hidden'&&c.display!=='none';});}" +
+                "return r.width>16&&r.height>16&&c.visibility!=='hidden'&&c.display!=='none';});}" +
                 "function select(el){" +
                 "document.querySelectorAll('.__aj_focus').forEach(function(x){x.classList.remove('__aj_focus');});" +
                 "window.__ajCur=el;" +
@@ -334,11 +446,14 @@ public class BrowserActivity extends Activity {
                 "if(next>=list.length){window.scrollBy(0,240);return 'END';}" +
                 "select(list[next]);return 'OK';};" +
                 "window.__ajClick=function(){" +
-                "var el=window.__ajCur;if(!el)return;" +
+                "var el=window.__ajCur;if(!el)return '';" +
+                "if(el.tagName==='IFRAME'||el.tagName==='VIDEO'){" +
+                "var r=el.getBoundingClientRect();" +
+                "return 'TAP:'+Math.round(r.left+r.width/2)+','+Math.round(r.top+r.height/2);}" +
                 "var h=location.hostname.toLowerCase();" +
                 "if((h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com')&&el.tagName==='A'){" +
                 "el.removeAttribute('target');}" +
-                "el.click();};" +
+                "el.click();return 'CLICK';};" +
                 "if(!window.__ajCur&&location.hash){setTimeout(function(){window.__ajStep(1);},250);}" +
                 "})();", null);
     }
@@ -378,7 +493,13 @@ public class BrowserActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        if (webView.canGoBack()) {
+        if (customView != null) {
+            if (customViewCallback != null) customViewCallback.onCustomViewHidden();
+            fullscreenContainer.removeAllViews();
+            fullscreenContainer.setVisibility(View.GONE);
+            customView = null;
+            customViewCallback = null;
+        } else if (webView.canGoBack()) {
             webView.goBack();
         } else {
             finish();
