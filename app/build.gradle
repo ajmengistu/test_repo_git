@@ -10,19 +10,49 @@ android {
         applicationId 'com.aj.firelauncher'
         minSdk 23
         targetSdk 28
-        versionCode 3
-        versionName '0.3.0'
+        versionCode 4
+        versionName '0.4.0'
+    }
+
+    signingConfigs {
+        release {
+            if (System.getenv('AJ_KEYSTORE_PATH')) {
+                storeFile file(System.getenv('AJ_KEYSTORE_PATH'))
+                storePassword System.getenv('AJ_KEYSTORE_PASSWORD')
+                keyAlias 'aj-launcher'
+                keyPassword System.getenv('AJ_KEYSTORE_PASSWORD')
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix '.preview'
+        }
         release {
+            if (System.getenv('AJ_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.release
+            }
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
+    }
+
+    testOptions {
+        unitTests.includeAndroidResources = true
+    }
+
+    lint {
+        disable 'ExpiredTargetSdkVersion'
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
 }

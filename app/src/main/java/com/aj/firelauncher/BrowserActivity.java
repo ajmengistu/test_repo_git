@@ -62,7 +62,9 @@ public class BrowserActivity extends Activity {
 
         buildUi();
         configureWebView();
-        webView.loadUrl(HOME);
+        Uri initialUri = getIntent() != null ? getIntent().getData() : null;
+        webView.loadUrl(initialUri != null && "https".equals(initialUri.getScheme())
+                && "fmhy.net".equals(initialUri.getHost()) ? initialUri.toString() : HOME);
     }
 
     private void buildUi() {

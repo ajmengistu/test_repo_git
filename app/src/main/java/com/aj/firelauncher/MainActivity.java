@@ -10,6 +10,7 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.provider.Settings;
@@ -32,7 +33,6 @@ import android.widget.Toast;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -42,7 +42,7 @@ import java.util.Map;
 public class MainActivity extends Activity {
     private static final String PREFS = "launcher_prefs";
     private static final String PREF_FAVORITE_PACKAGES = "favorite_packages_v2";
-    private static final String PREF_V2_MIGRATED = "favorites_v2_migrated";
+    private static final String PREF_V2_MIGRATED = "favorites_v4_migrated";
 
     private final Handler clockHandler = new Handler();
     private final SimpleDateFormat timeFormat = new SimpleDateFormat("h:mm", Locale.getDefault());
@@ -55,6 +55,11 @@ public class MainActivity extends Activity {
     private TextView focusSubtitle;
     private SharedPreferences prefs;
     private final Map<String, AppEntry> appsByPackage = new LinkedHashMap<>();
+    private final Map<String, View> focusTargets = new LinkedHashMap<>();
+    private final List<List<View>> navigationRows = new ArrayList<>();
+    private String focusedKey = "favorite:prime video";
+    private boolean allAppsExpanded;
+    private List<AppEntry> currentEntries = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,6 +68,10 @@ public class MainActivity extends Activity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         hideSystemUi();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
+        if (savedInstanceState != null) {
+            focusedKey = savedInstanceState.getString("focusedKey", focusedKey);
+            allAppsExpanded = savedInstanceState.getBoolean("allAppsExpanded");
+        }
         buildUi();
     }
 
@@ -82,7 +91,20 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        // Stay on the launcher.
+        if (allAppsExpanded) {
+            allAppsExpanded = false;
+            focusedKey = "all-apps";
+            renderRows(currentEntries);
+        } else if (!navigationRows.isEmpty()) {
+            navigationRows.get(0).get(0).requestFocus();
+        }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle state) {
+        state.putString("focusedKey", focusedKey);
+        state.putBoolean("allAppsExpanded", allAppsExpanded);
+        super.onSaveInstanceState(state);
     }
 
     private void buildUi() {
@@ -99,7 +121,7 @@ public class MainActivity extends Activity {
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(54), dp(32), dp(54), dp(54));
+        content.setPadding(dp(40), dp(22), dp(40), dp(30));
         verticalScroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -108,7 +130,7 @@ public class MainActivity extends Activity {
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setOrientation(LinearLayout.HORIZONTAL);
         content.addView(header, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(104)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(76)));
 
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
@@ -124,7 +146,7 @@ public class MainActivity extends Activity {
         focusTitle = new TextView(this);
         focusTitle.setText("Favorites");
         focusTitle.setTextColor(Color.WHITE);
-        focusTitle.setTextSize(31);
+        focusTitle.setTextSize(26);
         focusTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -170,7 +192,8 @@ public class MainActivity extends Activity {
         queryCategory(pm, Intent.CATEGORY_LEANBACK_LAUNCHER);
 
         List<AppEntry> entries = new ArrayList<>(appsByPackage.values());
-        Collections.sort(entries, Comparator.comparing(a -> a.label.toLowerCase(Locale.getDefault())));
+        Collections.sort(entries, (a, b) ->
+                a.label.toLowerCase(Locale.getDefault()).compareTo(b.label.toLowerCase(Locale.getDefault())));
 
         migrateFavoritesIfNeeded(entries);
         renderRows(entries);
@@ -203,57 +226,77 @@ public class MainActivity extends Activity {
     }
 
     private void renderRows(List<AppEntry> entries) {
+        currentEntries = entries;
+        String restoreKey = focusedKey;
+        focusTargets.clear();
+        navigationRows.clear();
         while (content.getChildCount() > 1) {
             content.removeViewAt(1);
         }
 
         List<String> favorites = getFavoritePackages();
-
-        addSectionTitle("Favorites", "Press OK to open · hold OK to add or remove");
-
-        HorizontalScrollView favoritesScroll = new HorizontalScrollView(this);
-        favoritesScroll.setHorizontalScrollBarEnabled(false);
-        favoritesScroll.setClipToPadding(false);
-        content.addView(favoritesScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(176)));
-
-        LinearLayout favoritesRow = new LinearLayout(this);
-        favoritesRow.setOrientation(LinearLayout.HORIZONTAL);
-        favoritesRow.setGravity(Gravity.CENTER_VERTICAL);
-        favoritesRow.setPadding(dp(3), dp(9), dp(24), dp(9));
-        favoritesScroll.addView(favoritesRow, new HorizontalScrollView.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
-
+        addSectionTitle("Favorites", "Press OK to open · hold OK to customize");
+        LinearLayout favoritesRow = addRow(144);
         for (String pkg : favorites) {
             AppEntry entry = appsByPackage.get(pkg);
             if (entry != null) {
                 addFavoriteTile(favoritesRow, entry);
+            } else if (pkg.startsWith("missing:")) {
+                String label = pkg.substring("missing:".length());
+                addActionTile(favoritesRow, label, "Not installed", android.R.drawable.ic_media_play,
+                        () -> showMissingApp(label));
             }
         }
+        collectRow(favoritesRow);
 
-        addSystemTile(favoritesRow, "Settings", "Fire TV", () -> openIntent(new Intent(Settings.ACTION_SETTINGS)), true);
+        addSectionTitle("Explore", "Opens in AJ Browser");
+        LinearLayout webRow = addRow(104);
+        addActionTile(webRow, "Streaming Sites", "FMHY · movies & TV",
+                android.R.drawable.ic_menu_search,
+                () -> openBrowser("https://fmhy.net/video#streaming-sites"));
+        addActionTile(webRow, "Live Sports", "FMHY · live sports",
+                android.R.drawable.ic_media_play,
+                () -> openBrowser("https://fmhy.net/video#live-sports"));
+        collectRow(webRow);
 
-        addSectionTitle("Tools", "Private browsing, VPN, and launcher controls");
+        LinearLayout toggleRow = addRow(66);
+        addActionTile(toggleRow, "All Apps", allAppsExpanded ? "▲ Collapse" : "▼ Expand",
+                android.R.drawable.ic_menu_sort_by_size, () -> {
+                    allAppsExpanded = !allAppsExpanded;
+                    focusedKey = "all-apps";
+                    renderRows(currentEntries);
+                });
+        View toggle = toggleRow.getChildAt(0);
+        registerTarget(toggle, "all-apps");
+        toggle.setContentDescription("All Apps, " + (allAppsExpanded ? "expanded" : "collapsed"));
+        collectRow(toggleRow);
 
-        HorizontalScrollView toolsScroll = new HorizontalScrollView(this);
-        toolsScroll.setHorizontalScrollBarEnabled(false);
-        toolsScroll.setClipToPadding(false);
-        content.addView(toolsScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(176)));
+        if (allAppsExpanded) {
+            GridLayout grid = new GridLayout(this);
+            grid.setColumnCount(4);
+            grid.setUseDefaultMargins(false);
+            content.addView(grid, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+            List<View> gridRow = new ArrayList<>();
+            for (AppEntry entry : entries) {
+                addGridTile(grid, entry, favorites.contains(entry.packageName));
+                gridRow.add(grid.getChildAt(grid.getChildCount() - 1));
+                if (gridRow.size() == 4) {
+                    navigationRows.add(gridRow);
+                    gridRow = new ArrayList<>();
+                }
+            }
+            if (!gridRow.isEmpty()) navigationRows.add(gridRow);
+        }
 
-        LinearLayout toolsRow = new LinearLayout(this);
-        toolsRow.setOrientation(LinearLayout.HORIZONTAL);
-        toolsRow.setGravity(Gravity.CENTER_VERTICAL);
-        toolsRow.setPadding(dp(3), dp(9), dp(24), dp(9));
-        toolsScroll.addView(toolsRow, new HorizontalScrollView.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
-
+        addSectionTitle("Settings & Tools", "");
+        LinearLayout toolsRow = addRow(104);
+        addSystemTile(toolsRow, "Settings", "Fire TV",
+                () -> openIntent(new Intent(Settings.ACTION_SETTINGS)), false);
         addActionTile(
                 toolsRow,
                 "AJ Browser",
-                "Aggressive popup blocking",
+                "Popup blocking enabled",
                 android.R.drawable.ic_menu_search,
                 () -> openIntent(new Intent(this, BrowserActivity.class)));
 
@@ -274,24 +317,67 @@ public class MainActivity extends Activity {
             addToolAppTile(toolsRow, homeOnFire, "Home button");
         }
 
-        addSectionTitle("All apps", "Everything installed, without duplicates");
-
-        GridLayout grid = new GridLayout(this);
-        grid.setColumnCount(5);
-        grid.setUseDefaultMargins(false);
-        grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
-        LinearLayout.LayoutParams gridLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        gridLp.topMargin = dp(4);
-        content.addView(grid, gridLp);
-
-        for (AppEntry entry : entries) {
-            addGridTile(grid, entry, favorites.contains(entry.packageName));
-        }
-
+        collectRow(toolsRow);
+        wireNavigation();
         content.post(() -> {
-            if (favoritesRow.getChildCount() > 0) favoritesRow.getChildAt(0).requestFocus();
+            View target = focusTargets.get(restoreKey);
+            if (target == null && restoreKey.startsWith("grid:")) target = focusTargets.get("all-apps");
+            if (target == null) target = navigationRows.get(0).get(0);
+            target.requestFocus();
         });
+    }
+
+    private LinearLayout addRow(int height) {
+        HorizontalScrollView scroll = new HorizontalScrollView(this);
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setClipToPadding(false);
+        scroll.setClipChildren(false);
+        scroll.setTag(height);
+        content.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(height)));
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(6), dp(8), dp(12), dp(8));
+        row.setClipChildren(false);
+        scroll.addView(row, new HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        return row;
+    }
+
+    private void collectRow(ViewGroup row) {
+        List<View> tiles = new ArrayList<>();
+        for (int index = 0; index < row.getChildCount(); index++) tiles.add(row.getChildAt(index));
+        if (!tiles.isEmpty()) navigationRows.add(tiles);
+    }
+
+    private void registerTarget(View tile, String key) {
+        tile.setId(View.generateViewId());
+        tile.setTag(key);
+        focusTargets.put(key, tile);
+    }
+
+    private void wireNavigation() {
+        for (int rowIndex = 0; rowIndex < navigationRows.size(); rowIndex++) {
+            List<View> row = navigationRows.get(rowIndex);
+            List<View> above = navigationRows.get(Math.max(0, rowIndex - 1));
+            List<View> below = navigationRows.get(Math.min(navigationRows.size() - 1, rowIndex + 1));
+            for (int column = 0; column < row.size(); column++) {
+                View tile = row.get(column);
+                tile.setNextFocusLeftId(row.get(Math.max(0, column - 1)).getId());
+                tile.setNextFocusRightId(row.get(Math.min(row.size() - 1, column + 1)).getId());
+                tile.setNextFocusUpId(above.get(Math.min(column, above.size() - 1)).getId());
+                tile.setNextFocusDownId(below.get(Math.min(column, below.size() - 1)).getId());
+            }
+        }
+    }
+
+    private void openBrowser(String url) {
+        openIntent(new Intent(this, BrowserActivity.class).setData(Uri.parse(url)));
+    }
+
+    private void showMissingApp(String label) {
+        Toast.makeText(this, "Install " + label + " from the Amazon Appstore.", Toast.LENGTH_LONG).show();
     }
 
     private void addSectionTitle(String titleText, String helperText) {
@@ -325,20 +411,22 @@ public class MainActivity extends Activity {
 
     private void addFavoriteTile(LinearLayout row, AppEntry entry) {
         View tile = createTile(entry.label, entry.icon, "Favorite", true);
+        registerTarget(tile, "favorite:" + entry.packageName);
         bindAppTile(tile, entry);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(224), dp(150));
-        lp.rightMargin = dp(16);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileWidth(3), dp(124));
+        lp.rightMargin = dp(12);
         row.addView(tile, lp);
     }
 
     private void addGridTile(GridLayout grid, AppEntry entry, boolean favorite) {
         View tile = createTile(entry.label, entry.icon, favorite ? "Favorite" : null, false);
+        registerTarget(tile, "grid:" + entry.packageName);
         bindAppTile(tile, entry);
 
         GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-        lp.width = dp(206);
-        lp.height = dp(126);
-        lp.setMargins(0, 0, dp(16), dp(16));
+        lp.width = tileWidth(4);
+        lp.height = dp(100);
+        lp.setMargins(dp(6), dp(6), dp(6), dp(6));
         grid.addView(tile, lp);
     }
 
@@ -356,25 +444,35 @@ public class MainActivity extends Activity {
 
     private void addActionTile(LinearLayout row, String title, String subtitle, int iconRes, Runnable action) {
         Drawable icon = getDrawable(iconRes);
-        View tile = createTile(title, icon, subtitle, true);
+        View tile = createTile(title, icon, subtitle, false);
+        registerTarget(tile, "action:" + title);
         tile.setOnClickListener(v -> action.run());
-
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(224), dp(150));
-        lp.rightMargin = dp(16);
+        int rowHeight = (Integer) ((View) row.getParent()).getTag();
+        if (rowHeight == 66) tile.findViewWithTag("icon").setVisibility(View.GONE);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                tileWidth("Streaming Sites".equals(title) || "Live Sports".equals(title) ? 2 : 3),
+                dp(rowHeight - 20));
+        lp.rightMargin = dp(12);
         row.addView(tile, lp);
     }
 
     private void addToolAppTile(LinearLayout row, AppEntry entry, String subtitle) {
-        View tile = createTile(entry.label, entry.icon, subtitle, true);
-        tile.setOnClickListener(v -> launch(entry));
+        addActionTile(row, entry.label, subtitle, android.R.drawable.ic_menu_manage, () -> launch(entry));
+        ImageView icon = row.getChildAt(row.getChildCount() - 1).findViewWithTag("icon");
+        icon.setImageDrawable(entry.icon);
+    }
 
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(224), dp(150));
-        lp.rightMargin = dp(16);
-        row.addView(tile, lp);
+    private int tileWidth(int columns) {
+        return (getResources().getDisplayMetrics().widthPixels - dp(92)) / columns - dp(12);
     }
 
     private AppEntry findAppByLabel(String needle) {
         String wanted = needle.toLowerCase(Locale.getDefault());
+        for (AppEntry entry : appsByPackage.values()) {
+            if (entry.label.toLowerCase(Locale.getDefault()).equals(wanted)) {
+                return entry;
+            }
+        }
         for (AppEntry entry : appsByPackage.values()) {
             if (entry.label.toLowerCase(Locale.getDefault()).contains(wanted)) {
                 return entry;
@@ -385,20 +483,28 @@ public class MainActivity extends Activity {
 
     private View createTile(String title, Drawable icon, String badge, boolean large) {
         LinearLayout tile = new LinearLayout(this);
-        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setOrientation(large ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(dp(18), dp(13), dp(18), dp(13));
+        tile.setPadding(dp(16), dp(10), dp(16), dp(10));
         tile.setFocusable(true);
         tile.setFocusableInTouchMode(true);
         tile.setBackgroundResource(R.drawable.tile_normal);
         tile.setElevation(dp(2));
 
         ImageView iconView = new ImageView(this);
+        iconView.setTag("icon");
         iconView.setImageDrawable(icon);
         iconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        int iconSize = large ? 66 : 52;
+        int iconSize = large ? 48 : 30;
         tile.addView(iconView, new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize)));
 
+        LinearLayout labels = new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout.LayoutParams labelsLp = new LinearLayout.LayoutParams(
+                large ? ViewGroup.LayoutParams.MATCH_PARENT : 0, ViewGroup.LayoutParams.WRAP_CONTENT,
+                large ? 0f : 1f);
+        labelsLp.leftMargin = large ? 0 : dp(12);
+        tile.addView(labels, labelsLp);
         TextView name = new TextView(this);
         name.setText(title);
         name.setTextColor(Color.rgb(246, 248, 252));
@@ -408,8 +514,8 @@ public class MainActivity extends Activity {
         name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        nameLp.topMargin = dp(8);
-        tile.addView(name, nameLp);
+        nameLp.topMargin = large ? dp(8) : 0;
+        labels.addView(name, nameLp);
 
         if (badge != null) {
             TextView badgeView = new TextView(this);
@@ -417,7 +523,8 @@ public class MainActivity extends Activity {
             badgeView.setTextColor(Color.rgb(157, 191, 255));
             badgeView.setTextSize(11);
             badgeView.setSingleLine(true);
-            tile.addView(badgeView);
+            badgeView.setEllipsize(TextUtils.TruncateAt.END);
+            labels.addView(badgeView);
         }
 
         tile.setOnFocusChangeListener((v, hasFocus) -> {
@@ -431,6 +538,7 @@ public class MainActivity extends Activity {
             v.setBackgroundResource(hasFocus ? R.drawable.tile_focused : R.drawable.tile_normal);
 
             if (hasFocus) {
+                focusedKey = (String) v.getTag();
                 focusTitle.setText(title);
                 focusSubtitle.setText(badge == null ? "Press OK to open" : badge + " · press OK to open");
 
@@ -467,12 +575,7 @@ public class MainActivity extends Activity {
         String[] desiredOrder = {
                 "prime video",
                 "peacock",
-                "youtube",
-                "hulu",
-                "disney",
-                "max",
-                "plex",
-                "spotify"
+                "youtube"
         };
 
         List<String> chosen = new ArrayList<>();
@@ -487,14 +590,6 @@ public class MainActivity extends Activity {
             }
         }
 
-        // Fill remaining spaces with installed apps, but do not auto-favorite Netflix.
-        for (AppEntry entry : entries) {
-            if (chosen.size() >= 8) break;
-            String label = entry.label.toLowerCase(Locale.getDefault());
-            if (label.contains("netflix")) continue;
-            if (!chosen.contains(entry.packageName)) chosen.add(entry.packageName);
-        }
-
         saveFavoritePackages(chosen);
         prefs.edit().putBoolean(PREF_V2_MIGRATED, true).apply();
     }
@@ -502,13 +597,20 @@ public class MainActivity extends Activity {
     private List<String> getFavoritePackages() {
         String raw = prefs.getString(PREF_FAVORITE_PACKAGES, "");
         List<String> result = new ArrayList<>();
-        if (raw == null || raw.trim().isEmpty()) return result;
+        if (raw == null || raw.trim().isEmpty()) raw = "";
 
         String[] pieces = raw.split("\\|");
         for (String piece : pieces) {
-            if (!piece.trim().isEmpty() && !result.contains(piece)) {
+            if (!piece.trim().isEmpty() && !piece.startsWith("missing:") && !result.contains(piece)) {
                 result.add(piece);
             }
+        }
+        String[] primary = {"Prime Video", "Peacock", "YouTube"};
+        for (int index = 0; index < primary.length; index++) {
+            AppEntry installed = findAppByLabel(primary[index]);
+            String key = installed == null ? "missing:" + primary[index] : installed.packageName;
+            result.remove(key);
+            result.add(index, key);
         }
         return result;
     }
@@ -523,6 +625,12 @@ public class MainActivity extends Activity {
     }
 
     private void toggleFavorite(String packageName) {
+        AppEntry entry = appsByPackage.get(packageName);
+        if (entry != null && (entry == findAppByLabel("prime video")
+                || entry == findAppByLabel("peacock") || entry == findAppByLabel("youtube"))) {
+            Toast.makeText(this, "Prime Video, Peacock and YouTube stay in Favorites.", Toast.LENGTH_SHORT).show();
+            return;
+        }
         List<String> current = getFavoritePackages();
         boolean added;
 
