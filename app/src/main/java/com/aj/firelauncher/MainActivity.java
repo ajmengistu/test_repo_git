@@ -234,6 +234,46 @@ public class MainActivity extends Activity {
 
         addSystemTile(favoritesRow, "Settings", "Fire TV", () -> openIntent(new Intent(Settings.ACTION_SETTINGS)), true);
 
+        addSectionTitle("Tools", "Private browsing, VPN, and launcher controls");
+
+        HorizontalScrollView toolsScroll = new HorizontalScrollView(this);
+        toolsScroll.setHorizontalScrollBarEnabled(false);
+        toolsScroll.setClipToPadding(false);
+        content.addView(toolsScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(176)));
+
+        LinearLayout toolsRow = new LinearLayout(this);
+        toolsRow.setOrientation(LinearLayout.HORIZONTAL);
+        toolsRow.setGravity(Gravity.CENTER_VERTICAL);
+        toolsRow.setPadding(dp(3), dp(9), dp(24), dp(9));
+        toolsScroll.addView(toolsRow, new HorizontalScrollView.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+
+        addActionTile(
+                toolsRow,
+                "AJ Browser",
+                "Aggressive popup blocking",
+                android.R.drawable.ic_menu_search,
+                () -> openIntent(new Intent(this, BrowserActivity.class)));
+
+        AppEntry nord = findAppByLabel("nordvpn");
+        if (nord != null) {
+            addToolAppTile(toolsRow, nord, "VPN");
+        } else {
+            addActionTile(
+                    toolsRow,
+                    "NordVPN",
+                    "Install from Amazon Appstore",
+                    android.R.drawable.ic_lock_lock,
+                    () -> Toast.makeText(this, "Install NordVPN from the Amazon Appstore, then it will appear here.", Toast.LENGTH_LONG).show());
+        }
+
+        AppEntry homeOnFire = findAppByLabel("home on fire");
+        if (homeOnFire != null) {
+            addToolAppTile(toolsRow, homeOnFire, "Home button");
+        }
+
         addSectionTitle("All apps", "Everything installed, without duplicates");
 
         GridLayout grid = new GridLayout(this);
@@ -311,13 +351,36 @@ public class MainActivity extends Activity {
     }
 
     private void addSystemTile(LinearLayout row, String title, String subtitle, Runnable action, boolean large) {
-        Drawable icon = getDrawable(android.R.drawable.ic_menu_manage);
-        View tile = createTile(title, icon, subtitle, large);
+        addActionTile(row, title, subtitle, android.R.drawable.ic_menu_manage, action);
+    }
+
+    private void addActionTile(LinearLayout row, String title, String subtitle, int iconRes, Runnable action) {
+        Drawable icon = getDrawable(iconRes);
+        View tile = createTile(title, icon, subtitle, true);
         tile.setOnClickListener(v -> action.run());
 
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(224), dp(150));
         lp.rightMargin = dp(16);
         row.addView(tile, lp);
+    }
+
+    private void addToolAppTile(LinearLayout row, AppEntry entry, String subtitle) {
+        View tile = createTile(entry.label, entry.icon, subtitle, true);
+        tile.setOnClickListener(v -> launch(entry));
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(224), dp(150));
+        lp.rightMargin = dp(16);
+        row.addView(tile, lp);
+    }
+
+    private AppEntry findAppByLabel(String needle) {
+        String wanted = needle.toLowerCase(Locale.getDefault());
+        for (AppEntry entry : appsByPackage.values()) {
+            if (entry.label.toLowerCase(Locale.getDefault()).contains(wanted)) {
+                return entry;
+            }
+        }
+        return null;
     }
 
     private View createTile(String title, Drawable icon, String badge, boolean large) {
