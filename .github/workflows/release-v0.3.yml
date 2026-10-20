@@ -1,0 +1,50 @@
+name: Publish AJ Launcher v0.3
+
+on:
+  push:
+    paths:
+      - ".github/workflows/release-v0.3.yml"
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download successful v0.3 build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: AJ-Launcher-debug
+          run-id: 39359600367
+          github-token: ${{ github.token }}
+          path: artifact
+
+      - name: Prepare original APK
+        shell: bash
+        run: |
+          mapfile -t apks < <(find artifact -type f -name '*.apk')
+          test "${#apks[@]}" -eq 1
+          cp "${apks[0]}" AJ-Launcher-v0.3.apk
+          unzip -t AJ-Launcher-v0.3.apk
+          sha256sum AJ-Launcher-v0.3.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ajmengistu/test_repo_git
+        run: |
+          gh release create v0.3 AJ-Launcher-v0.3.apk \
+            --target dd6828efbe112e6c87a467f5a883926ef5e2f2c0 \
+            --title "AJ Launcher v0.3" \
+            --notes "Original APK from successful Build APK run 39359600367 (commit dd6828efbe112e6c87a467f5a883926ef5e2f2c0). Published without rebuilding or changing app features."
+
+      - name: Verify public APK download matches original
+        shell: bash
+        run: |
+          curl --fail --location --retry 5 --retry-all-errors --retry-delay 3 \
+            "https://github.com/ajmengistu/test_repo_git/releases/download/v0.3/AJ-Launcher-v0.3.apk" \
+            --output downloaded.apk
+          cmp AJ-Launcher-v0.3.apk downloaded.apk
+          sha256sum downloaded.apk
