@@ -225,14 +225,14 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
-        addSystemTile(favoritesRow, "Settings", "Fire TV", () -> openIntent(new Intent(Settings.ACTION_SETTINGS)), true);
-
         for (String pkg : favorites) {
             AppEntry entry = appsByPackage.get(pkg);
             if (entry != null) {
                 addFavoriteTile(favoritesRow, entry);
             }
         }
+
+        addSystemTile(favoritesRow, "Settings", "Fire TV", () -> openIntent(new Intent(Settings.ACTION_SETTINGS)), true);
 
         addSectionTitle("All apps", "Everything installed, without duplicates");
 
