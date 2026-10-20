@@ -21,9 +21,11 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.GridLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -32,17 +34,15 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 public class MainActivity extends Activity {
     private static final String PREFS = "launcher_prefs";
-    private static final String PREF_FAVORITES = "favorites";
+    private static final String PREF_FAVORITE_PACKAGES = "favorite_packages_v2";
+    private static final String PREF_V2_MIGRATED = "favorites_v2_migrated";
 
     private final Handler clockHandler = new Handler();
     private final SimpleDateFormat timeFormat = new SimpleDateFormat("h:mm", Locale.getDefault());
@@ -51,8 +51,10 @@ public class MainActivity extends Activity {
     private LinearLayout content;
     private TextView clockView;
     private TextView dateView;
+    private TextView focusTitle;
+    private TextView focusSubtitle;
     private SharedPreferences prefs;
-    private final Map<String, AppEntry> appsByComponent = new LinkedHashMap<>();
+    private final Map<String, AppEntry> appsByPackage = new LinkedHashMap<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -80,54 +82,63 @@ public class MainActivity extends Activity {
 
     @Override
     public void onBackPressed() {
-        // Keep the launcher as home. Home on Fire provides its own escape route.
-    }
-
-    @Override
-    public boolean onKeyLongPress(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_MENU) {
-            Toast.makeText(this, "Hold OK on an app to add or remove it from Favorites.", Toast.LENGTH_LONG).show();
-            return true;
-        }
-        return super.onKeyLongPress(keyCode, event);
+        // Stay on the launcher.
     }
 
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.rgb(11, 13, 16));
+        root.setBackgroundResource(R.drawable.screen_bg);
+
+        ScrollView verticalScroll = new ScrollView(this);
+        verticalScroll.setFillViewport(true);
+        verticalScroll.setVerticalScrollBarEnabled(false);
+        verticalScroll.setClipToPadding(false);
+        root.addView(verticalScroll, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(52), dp(34), dp(52), dp(30));
-        root.addView(content, new FrameLayout.LayoutParams(
+        content.setPadding(dp(54), dp(32), dp(54), dp(54));
+        verticalScroll.addView(content, new ScrollView.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setOrientation(LinearLayout.HORIZONTAL);
         content.addView(header, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(88)));
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(104)));
 
-        LinearLayout identity = new LinearLayout(this);
-        identity.setOrientation(LinearLayout.VERTICAL);
-        header.addView(identity, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        header.addView(hero, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
-        TextView title = new TextView(this);
-        title.setText("Home");
-        title.setTextColor(Color.rgb(245, 247, 250));
-        title.setTextSize(28);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        identity.addView(title);
+        TextView brand = new TextView(this);
+        brand.setText("AJ Home");
+        brand.setTextColor(Color.rgb(246, 248, 252));
+        brand.setTextSize(16);
+        brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        hero.addView(brand);
 
-        TextView helper = new TextView(this);
-        helper.setText("Press OK to open · hold OK to favorite");
-        helper.setTextColor(Color.rgb(167, 175, 188));
-        helper.setTextSize(14);
-        LinearLayout.LayoutParams helperLp = new LinearLayout.LayoutParams(
+        focusTitle = new TextView(this);
+        focusTitle.setText("Favorites");
+        focusTitle.setTextColor(Color.WHITE);
+        focusTitle.setTextSize(31);
+        focusTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        helperLp.topMargin = dp(5);
-        identity.addView(helper, helperLp);
+        titleLp.topMargin = dp(3);
+        hero.addView(focusTitle, titleLp);
+
+        focusSubtitle = new TextView(this);
+        focusSubtitle.setText("Your most-used apps, one click away");
+        focusSubtitle.setTextColor(Color.rgb(190, 198, 211));
+        focusSubtitle.setTextSize(14);
+        LinearLayout.LayoutParams subtitleLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        subtitleLp.topMargin = dp(4);
+        hero.addView(focusSubtitle, subtitleLp);
 
         LinearLayout clockBox = new LinearLayout(this);
         clockBox.setOrientation(LinearLayout.VERTICAL);
@@ -142,7 +153,7 @@ public class MainActivity extends Activity {
         clockBox.addView(clockView);
 
         dateView = new TextView(this);
-        dateView.setTextColor(Color.rgb(167, 175, 188));
+        dateView.setTextColor(Color.rgb(190, 198, 211));
         dateView.setTextSize(14);
         dateView.setGravity(Gravity.END);
         clockBox.addView(dateView);
@@ -151,20 +162,34 @@ public class MainActivity extends Activity {
     }
 
     private void refreshApps() {
-        appsByComponent.clear();
+        appsByPackage.clear();
         PackageManager pm = getPackageManager();
 
-        Map<String, ResolveInfo> deduped = new HashMap<>();
-        queryCategory(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, deduped);
-        queryCategory(pm, Intent.CATEGORY_LAUNCHER, deduped);
+        // Launcher first, Leanback second so TV-specific activities win.
+        queryCategory(pm, Intent.CATEGORY_LAUNCHER);
+        queryCategory(pm, Intent.CATEGORY_LEANBACK_LAUNCHER);
 
-        List<AppEntry> entries = new ArrayList<>();
-        for (ResolveInfo info : deduped.values()) {
+        List<AppEntry> entries = new ArrayList<>(appsByPackage.values());
+        Collections.sort(entries, Comparator.comparing(a -> a.label.toLowerCase(Locale.getDefault())));
+
+        migrateFavoritesIfNeeded(entries);
+        renderRows(entries);
+    }
+
+    private void queryCategory(PackageManager pm, String category) {
+        Intent intent = new Intent(Intent.ACTION_MAIN);
+        intent.addCategory(category);
+        List<ResolveInfo> results = pm.queryIntentActivities(intent, 0);
+
+        for (ResolveInfo info : results) {
+            if (info.activityInfo == null) continue;
+
             String packageName = info.activityInfo.packageName;
             if (getPackageName().equals(packageName)) continue;
 
             CharSequence labelCs = info.loadLabel(pm);
             String label = labelCs == null ? packageName : labelCs.toString();
+
             Drawable icon;
             try {
                 icon = info.loadIcon(pm);
@@ -173,24 +198,7 @@ public class MainActivity extends Activity {
             }
 
             ComponentName component = new ComponentName(packageName, info.activityInfo.name);
-            AppEntry entry = new AppEntry(label, component, icon);
-            entries.add(entry);
-            appsByComponent.put(component.flattenToString(), entry);
-        }
-
-        Collections.sort(entries, Comparator.comparing(a -> a.label.toLowerCase(Locale.getDefault())));
-        ensureInitialFavorites(entries);
-        renderRows(entries);
-    }
-
-    private void queryCategory(PackageManager pm, String category, Map<String, ResolveInfo> target) {
-        Intent intent = new Intent(Intent.ACTION_MAIN);
-        intent.addCategory(category);
-        List<ResolveInfo> results = pm.queryIntentActivities(intent, 0);
-        for (ResolveInfo info : results) {
-            if (info.activityInfo == null) continue;
-            String key = info.activityInfo.packageName + "/" + info.activityInfo.name;
-            target.put(key, info);
+            appsByPackage.put(packageName, new AppEntry(label, packageName, component, icon));
         }
     }
 
@@ -199,79 +207,120 @@ public class MainActivity extends Activity {
             content.removeViewAt(1);
         }
 
-        Set<String> favorites = getFavorites();
-        List<AppEntry> favoriteEntries = new ArrayList<>();
-        for (String component : favorites) {
-            AppEntry entry = appsByComponent.get(component);
-            if (entry != null) favoriteEntries.add(entry);
-        }
-        Collections.sort(favoriteEntries, Comparator.comparing(a -> a.label.toLowerCase(Locale.getDefault())));
+        List<String> favorites = getFavoritePackages();
 
-        LinearLayout quick = addSection("Favorites");
-        addSystemTile(quick, "Settings", "System settings", () -> openIntent(new Intent(Settings.ACTION_SETTINGS)));
-        for (AppEntry entry : favoriteEntries) addAppTile(quick, entry, true);
+        addSectionTitle("Favorites", "Press OK to open · hold OK to add or remove");
 
-        LinearLayout all = addSection("Apps");
-        for (AppEntry entry : entries) addAppTile(all, entry, favorites.contains(entry.component.flattenToString()));
+        HorizontalScrollView favoritesScroll = new HorizontalScrollView(this);
+        favoritesScroll.setHorizontalScrollBarEnabled(false);
+        favoritesScroll.setClipToPadding(false);
+        content.addView(favoritesScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(176)));
 
-        content.post(() -> {
-            if (quick.getChildCount() > 0) quick.getChildAt(0).requestFocus();
-        });
-    }
-
-    private LinearLayout addSection(String titleText) {
-        TextView sectionTitle = new TextView(this);
-        sectionTitle.setText(titleText);
-        sectionTitle.setTextColor(Color.rgb(245, 247, 250));
-        sectionTitle.setTextSize(19);
-        sectionTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        titleLp.topMargin = dp(17);
-        titleLp.bottomMargin = dp(11);
-        content.addView(sectionTitle, titleLp);
-
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setClipToPadding(false);
-        scroll.setFillViewport(false);
-        content.addView(scroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(166)));
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(2), dp(7), dp(20), dp(7));
-        scroll.addView(row, new HorizontalScrollView.LayoutParams(
+        LinearLayout favoritesRow = new LinearLayout(this);
+        favoritesRow.setOrientation(LinearLayout.HORIZONTAL);
+        favoritesRow.setGravity(Gravity.CENTER_VERTICAL);
+        favoritesRow.setPadding(dp(3), dp(9), dp(24), dp(9));
+        favoritesScroll.addView(favoritesRow, new HorizontalScrollView.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
-        return row;
+
+        addSystemTile(favoritesRow, "Settings", "Fire TV", () -> openIntent(new Intent(Settings.ACTION_SETTINGS)), true);
+
+        for (String pkg : favorites) {
+            AppEntry entry = appsByPackage.get(pkg);
+            if (entry != null) {
+                addFavoriteTile(favoritesRow, entry);
+            }
+        }
+
+        addSectionTitle("All apps", "Everything installed, without duplicates");
+
+        GridLayout grid = new GridLayout(this);
+        grid.setColumnCount(5);
+        grid.setUseDefaultMargins(false);
+        grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
+        LinearLayout.LayoutParams gridLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        gridLp.topMargin = dp(4);
+        content.addView(grid, gridLp);
+
+        for (AppEntry entry : entries) {
+            addGridTile(grid, entry, favorites.contains(entry.packageName));
+        }
+
+        content.post(() -> {
+            if (favoritesRow.getChildCount() > 0) favoritesRow.getChildAt(0).requestFocus();
+        });
     }
 
-    private void addAppTile(LinearLayout row, AppEntry entry, boolean favorite) {
-        View tile = createTile(entry.label, entry.icon, favorite ? "Favorite" : null);
+    private void addSectionTitle(String titleText, String helperText) {
+        LinearLayout sectionHeader = new LinearLayout(this);
+        sectionHeader.setOrientation(LinearLayout.HORIZONTAL);
+        sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        headerLp.topMargin = dp(14);
+        headerLp.bottomMargin = dp(7);
+        content.addView(sectionHeader, headerLp);
+
+        TextView title = new TextView(this);
+        title.setText(titleText);
+        title.setTextColor(Color.rgb(246, 248, 252));
+        title.setTextSize(20);
+        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        sectionHeader.addView(title, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        TextView helper = new TextView(this);
+        helper.setText(helperText);
+        helper.setTextColor(Color.rgb(156, 168, 186));
+        helper.setTextSize(12);
+        LinearLayout.LayoutParams helperLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        helperLp.leftMargin = dp(14);
+        sectionHeader.addView(helper, helperLp);
+    }
+
+    private void addFavoriteTile(LinearLayout row, AppEntry entry) {
+        View tile = createTile(entry.label, entry.icon, "Favorite", true);
+        bindAppTile(tile, entry);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(224), dp(150));
+        lp.rightMargin = dp(16);
+        row.addView(tile, lp);
+    }
+
+    private void addGridTile(GridLayout grid, AppEntry entry, boolean favorite) {
+        View tile = createTile(entry.label, entry.icon, favorite ? "Favorite" : null, false);
+        bindAppTile(tile, entry);
+
+        GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
+        lp.width = dp(206);
+        lp.height = dp(126);
+        lp.setMargins(0, 0, dp(16), dp(16));
+        grid.addView(tile, lp);
+    }
+
+    private void bindAppTile(View tile, AppEntry entry) {
         tile.setOnClickListener(v -> launch(entry));
         tile.setOnLongClickListener(v -> {
-            toggleFavorite(entry.component.flattenToString());
+            toggleFavorite(entry.packageName);
             return true;
         });
-        row.addView(tile, tileLayoutParams());
     }
 
-    private void addSystemTile(LinearLayout row, String title, String subtitle, Runnable action) {
+    private void addSystemTile(LinearLayout row, String title, String subtitle, Runnable action, boolean large) {
         Drawable icon = getDrawable(android.R.drawable.ic_menu_manage);
-        View tile = createTile(title, icon, subtitle);
+        View tile = createTile(title, icon, subtitle, large);
         tile.setOnClickListener(v -> action.run());
-        row.addView(tile, tileLayoutParams());
+
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(224), dp(150));
+        lp.rightMargin = dp(16);
+        row.addView(tile, lp);
     }
 
-    private LinearLayout.LayoutParams tileLayoutParams() {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(206), dp(142));
-        lp.rightMargin = dp(15);
-        return lp;
-    }
-
-    private View createTile(String title, Drawable icon, String badge) {
+    private View createTile(String title, Drawable icon, String badge, boolean large) {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
@@ -284,24 +333,25 @@ public class MainActivity extends Activity {
         ImageView iconView = new ImageView(this);
         iconView.setImageDrawable(icon);
         iconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        tile.addView(iconView, new LinearLayout.LayoutParams(dp(62), dp(62)));
+        int iconSize = large ? 66 : 52;
+        tile.addView(iconView, new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize)));
 
         TextView name = new TextView(this);
         name.setText(title);
-        name.setTextColor(Color.rgb(245, 247, 250));
-        name.setTextSize(15);
+        name.setTextColor(Color.rgb(246, 248, 252));
+        name.setTextSize(large ? 16 : 14);
         name.setSingleLine(true);
         name.setEllipsize(TextUtils.TruncateAt.END);
         name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        nameLp.topMargin = dp(9);
+        nameLp.topMargin = dp(8);
         tile.addView(name, nameLp);
 
         if (badge != null) {
             TextView badgeView = new TextView(this);
             badgeView.setText(badge);
-            badgeView.setTextColor(Color.rgb(167, 175, 188));
+            badgeView.setTextColor(Color.rgb(157, 191, 255));
             badgeView.setTextSize(11);
             badgeView.setSingleLine(true);
             tile.addView(badgeView);
@@ -309,19 +359,22 @@ public class MainActivity extends Activity {
 
         tile.setOnFocusChangeListener((v, hasFocus) -> {
             v.animate()
-                    .scaleX(hasFocus ? 1.065f : 1.0f)
-                    .scaleY(hasFocus ? 1.065f : 1.0f)
-                    .translationY(hasFocus ? -dp(4) : 0)
-                    .setDuration(115)
+                    .scaleX(hasFocus ? 1.055f : 1.0f)
+                    .scaleY(hasFocus ? 1.055f : 1.0f)
+                    .translationY(hasFocus ? -dp(3) : 0)
+                    .setDuration(105)
                     .start();
             v.setElevation(hasFocus ? dp(18) : dp(2));
             v.setBackgroundResource(hasFocus ? R.drawable.tile_focused : R.drawable.tile_normal);
 
             if (hasFocus) {
+                focusTitle.setText(title);
+                focusSubtitle.setText(badge == null ? "Press OK to open" : badge + " · press OK to open");
+
                 View parent = (View) v.getParent();
                 if (parent != null && parent.getParent() instanceof HorizontalScrollView) {
                     HorizontalScrollView hsv = (HorizontalScrollView) parent.getParent();
-                    hsv.smoothScrollTo(Math.max(0, v.getLeft() - dp(45)), 0);
+                    hsv.smoothScrollTo(Math.max(0, v.getLeft() - dp(50)), 0);
                 }
             }
         });
@@ -345,52 +398,82 @@ public class MainActivity extends Activity {
         }
     }
 
-    private Set<String> getFavorites() {
-        return new HashSet<>(prefs.getStringSet(PREF_FAVORITES, Collections.emptySet()));
-    }
+    private void migrateFavoritesIfNeeded(List<AppEntry> entries) {
+        if (prefs.getBoolean(PREF_V2_MIGRATED, false)) return;
 
-    private void toggleFavorite(String component) {
-        Set<String> current = getFavorites();
-        boolean added;
-        if (current.contains(component)) {
-            current.remove(component);
-            added = false;
-        } else {
-            current.add(component);
-            added = true;
-        }
-        prefs.edit().putStringSet(PREF_FAVORITES, current).apply();
-        Toast.makeText(this, added ? "Added to Favorites" : "Removed from Favorites", Toast.LENGTH_SHORT).show();
-        refreshApps();
-    }
-
-    private void ensureInitialFavorites(List<AppEntry> entries) {
-        if (prefs.contains(PREF_FAVORITES)) return;
-
-        String[] preferredPackages = {
-                "com.google.android.youtube.tv",
-                "com.netflix.ninja",
-                "com.amazon.firebat",
-                "com.amazon.avod.thirdpartyclient",
-                "com.spotify.tv.android",
-                "com.plexapp.android"
+        String[] desiredOrder = {
+                "prime video",
+                "peacock",
+                "youtube",
+                "hulu",
+                "disney",
+                "max",
+                "plex",
+                "spotify"
         };
 
-        Set<String> initial = new HashSet<>();
-        for (String pkg : preferredPackages) {
+        List<String> chosen = new ArrayList<>();
+
+        for (String desired : desiredOrder) {
             for (AppEntry entry : entries) {
-                if (entry.component.getPackageName().equals(pkg)) {
-                    initial.add(entry.component.flattenToString());
+                String label = entry.label.toLowerCase(Locale.getDefault());
+                if (!chosen.contains(entry.packageName) && label.contains(desired)) {
+                    chosen.add(entry.packageName);
                     break;
                 }
             }
         }
 
+        // Fill remaining spaces with installed apps, but do not auto-favorite Netflix.
         for (AppEntry entry : entries) {
-            if (initial.size() >= 7) break;
-            initial.add(entry.component.flattenToString());
+            if (chosen.size() >= 8) break;
+            String label = entry.label.toLowerCase(Locale.getDefault());
+            if (label.contains("netflix")) continue;
+            if (!chosen.contains(entry.packageName)) chosen.add(entry.packageName);
         }
-        prefs.edit().putStringSet(PREF_FAVORITES, initial).apply();
+
+        saveFavoritePackages(chosen);
+        prefs.edit().putBoolean(PREF_V2_MIGRATED, true).apply();
+    }
+
+    private List<String> getFavoritePackages() {
+        String raw = prefs.getString(PREF_FAVORITE_PACKAGES, "");
+        List<String> result = new ArrayList<>();
+        if (raw == null || raw.trim().isEmpty()) return result;
+
+        String[] pieces = raw.split("\\|");
+        for (String piece : pieces) {
+            if (!piece.trim().isEmpty() && !result.contains(piece)) {
+                result.add(piece);
+            }
+        }
+        return result;
+    }
+
+    private void saveFavoritePackages(List<String> packages) {
+        StringBuilder out = new StringBuilder();
+        for (String pkg : packages) {
+            if (out.length() > 0) out.append('|');
+            out.append(pkg);
+        }
+        prefs.edit().putString(PREF_FAVORITE_PACKAGES, out.toString()).apply();
+    }
+
+    private void toggleFavorite(String packageName) {
+        List<String> current = getFavoritePackages();
+        boolean added;
+
+        if (current.contains(packageName)) {
+            current.remove(packageName);
+            added = false;
+        } else {
+            current.add(packageName);
+            added = true;
+        }
+
+        saveFavoritePackages(current);
+        Toast.makeText(this, added ? "Added to Favorites" : "Removed from Favorites", Toast.LENGTH_SHORT).show();
+        refreshApps();
     }
 
     private void startClock() {
@@ -423,11 +506,13 @@ public class MainActivity extends Activity {
 
     private static final class AppEntry {
         final String label;
+        final String packageName;
         final ComponentName component;
         final Drawable icon;
 
-        AppEntry(String label, ComponentName component, Drawable icon) {
+        AppEntry(String label, String packageName, ComponentName component, Drawable icon) {
             this.label = label;
+            this.packageName = packageName;
             this.component = component;
             this.icon = icon;
         }
