@@ -65,6 +65,7 @@ public class BrowserActivity extends Activity {
         Uri initialUri = getIntent() != null ? getIntent().getData() : null;
         webView.loadUrl(initialUri != null && "https".equals(initialUri.getScheme())
                 && "fmhy.net".equals(initialUri.getHost()) ? initialUri.toString() : HOME);
+        webView.requestFocus();
     }
 
     private void buildUi() {
@@ -131,8 +132,12 @@ public class BrowserActivity extends Activity {
         bar.addView(shield, shieldLp);
 
         webView = new WebView(this);
+        webView.setId(View.generateViewId());
         webView.setFocusable(true);
         webView.setFocusableInTouchMode(true);
+        for (int i = 0; i < bar.getChildCount(); i++) {
+            bar.getChildAt(i).setNextFocusDownId(webView.getId());
+        }
         root.addView(webView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
@@ -208,17 +213,73 @@ public class BrowserActivity extends Activity {
                             "}catch(e){}"+
                             "})();", null);
                 }
+                injectDpadNavigation(view);
             }
         });
 
         webView.setOnKeyListener((v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_UP && keyCode == KeyEvent.KEYCODE_MENU) {
-                address.requestFocus();
-                address.selectAll();
+            if (keyCode == KeyEvent.KEYCODE_MENU) {
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    address.requestFocus();
+                    address.selectAll();
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP
+                    || keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    int delta = (keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) ? 1 : -1;
+                    webView.evaluateJavascript("window.__ajStep ? window.__ajStep(" + delta + ") : 'NONE'", result -> {
+                        if ("\"TOP\"".equals(result) && keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                            address.requestFocus();
+                        }
+                    });
+                }
+                return true;
+            }
+            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+                if (event.getAction() == KeyEvent.ACTION_UP) {
+                    webView.evaluateJavascript("window.__ajClick && window.__ajClick(" + aggressive + ")", null);
+                }
                 return true;
             }
             return false;
         });
+    }
+
+    private void injectDpadNavigation(WebView view) {
+        view.evaluateJavascript(
+                "(function(){" +
+                "if(!document.getElementById('__aj_style')){" +
+                "var st=document.createElement('style');st.id='__aj_style';" +
+                "st.textContent='.__aj_focus{outline:3px solid #D8E8FF !important;outline-offset:2px !important;background-color:rgba(49,76,119,0.55) !important;border-radius:5px !important;}';" +
+                "document.head.appendChild(st);}" +
+                "function vis(){" +
+                "return Array.prototype.slice.call(document.querySelectorAll('a[href],button,input,summary,[role=button]')).filter(function(el){" +
+                "var r=el.getBoundingClientRect(),c=window.getComputedStyle(el);" +
+                "return r.width>4&&r.height>4&&c.visibility!=='hidden'&&c.display!=='none';});}" +
+                "function select(el){" +
+                "document.querySelectorAll('.__aj_focus').forEach(function(x){x.classList.remove('__aj_focus');});" +
+                "window.__ajCur=el;" +
+                "if(el){el.classList.add('__aj_focus');try{el.focus({preventScroll:true});}catch(e){}el.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});}}" +
+                "window.__ajStep=function(d){" +
+                "var list=vis();if(!list.length){window.scrollBy(0,d*240);return 'SCROLL';}" +
+                "var idx=list.indexOf(window.__ajCur);" +
+                "if(idx===-1){" +
+                "var topY=40;" +
+                "if(location.hash){var h=document.querySelector(location.hash);if(h)topY=Math.max(0,h.getBoundingClientRect().top-20);}" +
+                "idx=0;for(var i=0;i<list.length;i++){if(list[i].getBoundingClientRect().top>=topY){idx=i;break;}}" +
+                "select(list[idx]);return 'OK';}" +
+                "var next=idx+d;" +
+                "if(next<0){if(window.scrollY<=10)return 'TOP';window.scrollBy(0,-240);select(list[0]);return 'TOP_SCROLL';}" +
+                "if(next>=list.length){window.scrollBy(0,240);return 'END';}" +
+                "select(list[next]);return 'OK';};" +
+                "window.__ajClick=function(noTarget){" +
+                "var el=window.__ajCur;if(!el)return;" +
+                "if(noTarget&&el.tagName==='A')el.removeAttribute('target');" +
+                "el.click();};" +
+                "if(!window.__ajCur&&location.hash){setTimeout(function(){window.__ajStep(1);},250);}" +
+                "})();", null);
     }
 
     private boolean isBlocked(String host) {

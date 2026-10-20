@@ -111,26 +111,18 @@ public class MainActivity extends Activity {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundResource(R.drawable.screen_bg);
 
-        ScrollView verticalScroll = new ScrollView(this);
-        verticalScroll.setFillViewport(true);
-        verticalScroll.setVerticalScrollBarEnabled(false);
-        verticalScroll.setClipToPadding(false);
-        root.addView(verticalScroll, new FrameLayout.LayoutParams(
+        LinearLayout screenLayout = new LinearLayout(this);
+        screenLayout.setOrientation(LinearLayout.VERTICAL);
+        root.addView(screenLayout, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT));
-
-        content = new LinearLayout(this);
-        content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(40), dp(22), dp(40), dp(30));
-        verticalScroll.addView(content, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        content.addView(header, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(76)));
+        header.setPadding(dp(40), dp(18), dp(40), dp(12));
+        screenLayout.addView(header, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         LinearLayout hero = new LinearLayout(this);
         hero.setOrientation(LinearLayout.VERTICAL);
@@ -139,7 +131,7 @@ public class MainActivity extends Activity {
         TextView brand = new TextView(this);
         brand.setText("AJ Home");
         brand.setTextColor(Color.rgb(246, 248, 252));
-        brand.setTextSize(16);
+        brand.setTextSize(15);
         brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         hero.addView(brand);
 
@@ -150,7 +142,7 @@ public class MainActivity extends Activity {
         focusTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        titleLp.topMargin = dp(3);
+        titleLp.topMargin = dp(2);
         hero.addView(focusTitle, titleLp);
 
         focusSubtitle = new TextView(this);
@@ -159,7 +151,7 @@ public class MainActivity extends Activity {
         focusSubtitle.setTextSize(14);
         LinearLayout.LayoutParams subtitleLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        subtitleLp.topMargin = dp(4);
+        subtitleLp.topMargin = dp(3);
         hero.addView(focusSubtitle, subtitleLp);
 
         LinearLayout clockBox = new LinearLayout(this);
@@ -179,6 +171,20 @@ public class MainActivity extends Activity {
         dateView.setTextSize(14);
         dateView.setGravity(Gravity.END);
         clockBox.addView(dateView);
+
+        ScrollView verticalScroll = new ScrollView(this);
+        verticalScroll.setFillViewport(true);
+        verticalScroll.setVerticalScrollBarEnabled(false);
+        verticalScroll.setClipToPadding(false);
+        screenLayout.addView(verticalScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(40), dp(6), dp(40), dp(32));
+        verticalScroll.addView(content, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
 
         setContentView(root);
     }
@@ -230,13 +236,11 @@ public class MainActivity extends Activity {
         String restoreKey = focusedKey;
         focusTargets.clear();
         navigationRows.clear();
-        while (content.getChildCount() > 1) {
-            content.removeViewAt(1);
-        }
+        content.removeAllViews();
 
         List<String> favorites = getFavoritePackages();
         addSectionTitle("Favorites", "Press OK to open · hold OK to customize");
-        LinearLayout favoritesRow = addRow(144);
+        LinearLayout favoritesRow = addRow(156);
         for (String pkg : favorites) {
             AppEntry entry = appsByPackage.get(pkg);
             if (entry != null) {
@@ -250,7 +254,7 @@ public class MainActivity extends Activity {
         collectRow(favoritesRow);
 
         addSectionTitle("Explore", "Opens in AJ Browser");
-        LinearLayout webRow = addRow(104);
+        LinearLayout webRow = addRow(106);
         addActionTile(webRow, "Streaming Sites", "FMHY · movies & TV",
                 android.R.drawable.ic_menu_search,
                 () -> openBrowser("https://fmhy.net/video#streaming-sites"));
@@ -259,7 +263,7 @@ public class MainActivity extends Activity {
                 () -> openBrowser("https://fmhy.net/video#live-sports"));
         collectRow(webRow);
 
-        LinearLayout toggleRow = addRow(66);
+        LinearLayout toggleRow = addRow(88);
         addActionTile(toggleRow, "All Apps", allAppsExpanded ? "▲ Collapse" : "▼ Expand",
                 android.R.drawable.ic_menu_sort_by_size, () -> {
                     allAppsExpanded = !allAppsExpanded;
@@ -290,7 +294,7 @@ public class MainActivity extends Activity {
         }
 
         addSectionTitle("Settings & Tools", "");
-        LinearLayout toolsRow = addRow(104);
+        LinearLayout toolsRow = addRow(106);
         addSystemTile(toolsRow, "Settings", "Fire TV",
                 () -> openIntent(new Intent(Settings.ACTION_SETTINGS)), false);
         addActionTile(
@@ -413,7 +417,7 @@ public class MainActivity extends Activity {
         View tile = createTile(entry.label, entry.icon, "Favorite", true);
         registerTarget(tile, "favorite:" + entry.packageName);
         bindAppTile(tile, entry);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileWidth(3), dp(124));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileWidth(3), dp(136));
         lp.rightMargin = dp(12);
         row.addView(tile, lp);
     }
@@ -425,7 +429,7 @@ public class MainActivity extends Activity {
 
         GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
         lp.width = tileWidth(4);
-        lp.height = dp(100);
+        lp.height = dp(92);
         lp.setMargins(dp(6), dp(6), dp(6), dp(6));
         grid.addView(tile, lp);
     }
@@ -444,11 +448,12 @@ public class MainActivity extends Activity {
 
     private void addActionTile(LinearLayout row, String title, String subtitle, int iconRes, Runnable action) {
         Drawable icon = getDrawable(iconRes);
-        View tile = createTile(title, icon, subtitle, false);
+        int rowHeight = (Integer) ((View) row.getParent()).getTag();
+        boolean isFavoriteRow = rowHeight == 156;
+        View tile = createTile(title, icon, subtitle, isFavoriteRow);
         registerTarget(tile, "action:" + title);
         tile.setOnClickListener(v -> action.run());
-        int rowHeight = (Integer) ((View) row.getParent()).getTag();
-        if (rowHeight == 66) tile.findViewWithTag("icon").setVisibility(View.GONE);
+        if (rowHeight == 88) tile.findViewWithTag("icon").setVisibility(View.GONE);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
                 tileWidth("Streaming Sites".equals(title) || "Live Sports".equals(title) ? 2 : 3),
                 dp(rowHeight - 20));
@@ -485,7 +490,11 @@ public class MainActivity extends Activity {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(large ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(dp(16), dp(10), dp(16), dp(10));
+        tile.setPadding(
+                dp(large ? 20 : 18),
+                dp(14),
+                dp(large ? 20 : 18),
+                dp(large ? 18 : 16));
         tile.setFocusable(true);
         tile.setFocusableInTouchMode(true);
         tile.setBackgroundResource(R.drawable.tile_normal);
@@ -495,7 +504,7 @@ public class MainActivity extends Activity {
         iconView.setTag("icon");
         iconView.setImageDrawable(icon);
         iconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        int iconSize = large ? 48 : 30;
+        int iconSize = large ? 46 : 32;
         tile.addView(iconView, new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize)));
 
         LinearLayout labels = new LinearLayout(this);
@@ -508,23 +517,28 @@ public class MainActivity extends Activity {
         TextView name = new TextView(this);
         name.setText(title);
         name.setTextColor(Color.rgb(246, 248, 252));
-        name.setTextSize(large ? 16 : 14);
+        name.setTextSize(large ? 16 : 15);
+        name.setIncludeFontPadding(false);
         name.setSingleLine(true);
         name.setEllipsize(TextUtils.TruncateAt.END);
         name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        nameLp.topMargin = large ? dp(8) : 0;
+        nameLp.topMargin = large ? dp(10) : 0;
         labels.addView(name, nameLp);
 
         if (badge != null) {
             TextView badgeView = new TextView(this);
             badgeView.setText(badge);
             badgeView.setTextColor(Color.rgb(157, 191, 255));
-            badgeView.setTextSize(11);
+            badgeView.setTextSize(12);
+            badgeView.setIncludeFontPadding(false);
             badgeView.setSingleLine(true);
             badgeView.setEllipsize(TextUtils.TruncateAt.END);
-            labels.addView(badgeView);
+            LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            badgeLp.topMargin = dp(4);
+            labels.addView(badgeView, badgeLp);
         }
 
         tile.setOnFocusChangeListener((v, hasFocus) -> {
