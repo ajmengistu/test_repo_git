@@ -261,6 +261,9 @@ public class MainActivity extends Activity {
         addActionTile(webRow, "Live Sports", "FMHY · live sports",
                 android.R.drawable.ic_media_play,
                 () -> openBrowser("https://fmhy.net/video#live-sports"));
+        addActionTile(webRow, "IMDb", "Watchlist & ratings",
+                android.R.drawable.btn_star_big_on,
+                () -> openBrowser("https://www.imdb.com/"));
         collectRow(webRow);
 
         LinearLayout toggleRow = addRow(88);
@@ -455,7 +458,7 @@ public class MainActivity extends Activity {
         tile.setOnClickListener(v -> action.run());
         if (rowHeight == 88) tile.findViewWithTag("icon").setVisibility(View.GONE);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                tileWidth("Streaming Sites".equals(title) || "Live Sports".equals(title) ? 2 : 3),
+                tileWidth(3),
                 dp(rowHeight - 20));
         lp.rightMargin = dp(12);
         row.addView(tile, lp);

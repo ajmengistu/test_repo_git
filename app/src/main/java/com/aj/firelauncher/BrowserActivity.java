@@ -14,6 +14,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
+import android.webkit.CookieManager;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -81,9 +83,26 @@ public class BrowserActivity extends Activity {
         buildUi();
         configureWebView();
         Uri initialUri = getIntent() != null ? getIntent().getData() : null;
-        webView.loadUrl(initialUri != null && "https".equals(initialUri.getScheme())
-                && "fmhy.net".equals(initialUri.getHost()) ? initialUri.toString() : HOME);
+        webView.loadUrl(isAllowedInitialUri(initialUri) ? initialUri.toString() : HOME);
         webView.requestFocus();
+    }
+
+    private boolean isAllowedInitialUri(Uri uri) {
+        if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null) {
+            return false;
+        }
+        String host = uri.getHost().toLowerCase(Locale.US);
+        return host.equals("fmhy.net") || host.endsWith(".fmhy.net")
+                || host.equals("imdb.com") || host.endsWith(".imdb.com");
+    }
+
+    private boolean isTrustedHost(String host) {
+        if (host == null) return false;
+        String h = host.toLowerCase(Locale.US);
+        return h.equals("fmhy.net") || h.endsWith(".fmhy.net")
+                || h.equals("search.brave.com")
+                || h.equals("imdb.com") || h.endsWith(".imdb.com")
+                || h.equals("amazon.com") || h.endsWith(".amazon.com");
     }
 
     private void buildUi() {
@@ -201,6 +220,8 @@ public class BrowserActivity extends Activity {
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setSaveFormData(true);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
@@ -208,6 +229,7 @@ public class BrowserActivity extends Activity {
         s.setDisplayZoomControls(false);
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(true);
+        enablePersistentCookies();
         String ua = s.getUserAgentString();
         if (ua != null) {
             ua = ua.replace("; wv)", ")").replace("Version/4.0 ", "");
@@ -229,9 +251,7 @@ public class BrowserActivity extends Activity {
                 }
                 String currentUrl = view != null ? view.getUrl() : null;
                 String currentHost = currentUrl != null ? Uri.parse(currentUrl).getHost() : null;
-                boolean isDirectory = currentHost != null && (
-                        currentHost.equals("fmhy.net") || currentHost.endsWith(".fmhy.net")
-                        || currentHost.equals("search.brave.com"));
+                boolean isDirectory = isTrustedHost(currentHost);
                 if ((!aggressive || isDirectory) && isUserGesture && view != null) {
                     WebView.HitTestResult hit = view.getHitTestResult();
                     if (hit != null && hit.getExtra() != null) {
@@ -321,6 +341,7 @@ public class BrowserActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 address.setText(url);
+                flushCookies();
                 unsandboxIframes(view);
                 if (aggressive) {
                     stripOverlays(view);
@@ -352,14 +373,22 @@ public class BrowserActivity extends Activity {
             if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
                 if (event.getAction() == KeyEvent.ACTION_UP) {
                     webView.evaluateJavascript("window.__ajClick ? window.__ajClick() : ''", result -> {
-                        if (result != null && result.startsWith("\"TAP:")) {
-                            String[] parts = result.replace("\"", "").substring(4).split(",");
+                        if (result != null && (result.startsWith("\"TAP:") || result.startsWith("\"INPUT:"))) {
+                            boolean isInput = result.startsWith("\"INPUT:");
+                            String coords = result.replace("\"", "").substring(isInput ? 6 : 4);
+                            String[] parts = coords.split(",");
                             if (parts.length == 2) {
                                 try {
                                     float density = getResources().getDisplayMetrics().density;
                                     float x = Float.parseFloat(parts[0]) * density;
                                     float y = Float.parseFloat(parts[1]) * density;
                                     tapWebView(x, y);
+                                    if (isInput) {
+                                        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+                                        if (imm != null) {
+                                            imm.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT);
+                                        }
+                                    }
                                 } catch (Exception ignored) {
                                 }
                             }
@@ -370,6 +399,22 @@ public class BrowserActivity extends Activity {
             }
             return false;
         });
+    }
+
+    private void enablePersistentCookies() {
+        try {
+            CookieManager cm = CookieManager.getInstance();
+            cm.setAcceptCookie(true);
+            cm.setAcceptThirdPartyCookies(webView, true);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void flushCookies() {
+        try {
+            CookieManager.getInstance().flush();
+        } catch (Throwable ignored) {
+        }
     }
 
     private void tapWebView(float x, float y) {
@@ -399,7 +444,7 @@ public class BrowserActivity extends Activity {
                 "if(f.parentNode)f.parentNode.replaceChild(c,f);" +
                 "});" +
                 "var h=location.hostname.toLowerCase();" +
-                "if(h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com'){" +
+                "if(h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com'||h==='imdb.com'||h.endsWith('.imdb.com')||h==='amazon.com'||h.endsWith('.amazon.com')){" +
                 "document.querySelectorAll('a[target]').forEach(function(a){a.removeAttribute('target');});" +
                 "}" +
                 "}catch(e){}" +
@@ -456,11 +501,17 @@ public class BrowserActivity extends Activity {
                 "select(list[next]);return 'OK';};" +
                 "window.__ajClick=function(){" +
                 "var el=window.__ajCur;if(!el)return '';" +
-                "if(el.tagName==='IFRAME'||el.tagName==='VIDEO'){" +
                 "var r=el.getBoundingClientRect();" +
-                "return 'TAP:'+Math.round(r.left+r.width/2)+','+Math.round(r.top+r.height/2);}" +
+                "var cx=Math.round(r.left+r.width/2),cy=Math.round(r.top+r.height/2);" +
+                "if(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.tagName==='SELECT'||el.isContentEditable){" +
+                "try{el.focus();}catch(e){}" +
+                "var t=(el.type||'').toLowerCase();" +
+                "if(el.tagName==='INPUT'&&(t==='submit'||t==='button'||t==='checkbox'||t==='radio')){el.click();return 'CLICK';}" +
+                "return 'INPUT:'+cx+','+cy;}" +
+                "if(el.tagName==='IFRAME'||el.tagName==='VIDEO'){" +
+                "return 'TAP:'+cx+','+cy;}" +
                 "var h=location.hostname.toLowerCase();" +
-                "if((h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com')&&el.tagName==='A'){" +
+                "if((h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com'||h==='imdb.com'||h.endsWith('.imdb.com')||h==='amazon.com'||h.endsWith('.amazon.com'))&&el.tagName==='A'){" +
                 "el.removeAttribute('target');}" +
                 "el.click();return 'CLICK';};" +
                 "if(!window.__ajCur&&location.hash){setTimeout(function(){window.__ajStep(1);},250);}" +
@@ -516,7 +567,14 @@ public class BrowserActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        flushCookies();
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
+        flushCookies();
         if (webView != null) {
             webView.stopLoading();
             webView.destroy();

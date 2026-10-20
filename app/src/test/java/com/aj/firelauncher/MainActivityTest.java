@@ -54,7 +54,8 @@ public class MainActivityTest {
     public void shortcutsUseExactFragmentsAndExplicitInternalBrowser() {
         for (String[] shortcut : new String[][] {
                 {"Streaming Sites", "https://fmhy.net/video#streaming-sites"},
-                {"Live Sports", "https://fmhy.net/video#live-sports"}}) {
+                {"Live Sports", "https://fmhy.net/video#live-sports"},
+                {"IMDb", "https://www.imdb.com/"}}) {
             tile(shortcut[0]).performClick();
             Intent launched = shadowOf(activity).getNextStartedActivity();
             assertEquals(shortcut[1], launched.getDataString());
