@@ -114,7 +114,7 @@ public class MainActivityTest {
                      Robolectric.buildActivity(BrowserActivity.class, intent).setup()) {
             WebView web = findWebView(browser.get().findViewById(android.R.id.content));
             assertEquals(intent.getDataString(), web.getUrl());
-            assertFalse(web.getSettings().supportMultipleWindows());
+            assertTrue(web.getSettings().supportMultipleWindows());
             assertFalse(web.getSettings().getJavaScriptCanOpenWindowsAutomatically());
             assertTrue(web.getSettings().getJavaScriptEnabled());
             assertFalse(shadowOf(web).getWebChromeClient().onCreateWindow(web, false, true, null));

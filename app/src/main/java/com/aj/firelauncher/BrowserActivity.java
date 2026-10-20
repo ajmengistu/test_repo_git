@@ -46,7 +46,18 @@ public class BrowserActivity extends Activity {
             "trafficjunky.net",
             "scorecardresearch.com",
             "quantserve.com",
-            "zedo.com"
+            "zedo.com",
+            "exoclick.com",
+            "magsrv.com",
+            "realsrv.com",
+            "adsterra.com",
+            "onclickads.net",
+            "hilltopads.net",
+            "juicyads.com",
+            "trafficstars.com",
+            "acscdn.com",
+            "usrpubtrk.com",
+            "adtng.com"
     ));
 
     private WebView webView;
@@ -127,9 +138,20 @@ public class BrowserActivity extends Activity {
                     Toast.LENGTH_SHORT).show();
             webView.reload();
         });
-        LinearLayout.LayoutParams shieldLp = new LinearLayout.LayoutParams(dp(154), dp(48));
-        shieldLp.leftMargin = dp(12);
+        LinearLayout.LayoutParams shieldLp = new LinearLayout.LayoutParams(dp(136), dp(48));
+        shieldLp.leftMargin = dp(10);
         bar.addView(shield, shieldLp);
+
+        TextView clean = button("Clear Ads");
+        clean.setTextSize(13);
+        clean.setOnClickListener(v -> {
+            stripOverlays(webView);
+            Toast.makeText(this, "Cleared overlays", Toast.LENGTH_SHORT).show();
+            webView.requestFocus();
+        });
+        LinearLayout.LayoutParams cleanLp = new LinearLayout.LayoutParams(dp(116), dp(48));
+        cleanLp.leftMargin = dp(8);
+        bar.addView(clean, cleanLp);
 
         webView = new WebView(this);
         webView.setId(View.generateViewId());
@@ -164,18 +186,29 @@ public class BrowserActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setMediaPlaybackRequiresUserGesture(false);
-        s.setSupportMultipleWindows(false);
+        s.setSupportMultipleWindows(true);
         s.setJavaScriptCanOpenWindowsAutomatically(false);
         s.setBuiltInZoomControls(true);
         s.setDisplayZoomControls(false);
         s.setUseWideViewPort(true);
         s.setLoadWithOverviewMode(true);
+        String ua = s.getUserAgentString();
+        if (ua != null) {
+            s.setUserAgentString(ua.replace("; wv)", ")").replace("Version/4.0 ", ""));
+        }
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture,
                                           android.os.Message resultMsg) {
-                // Aggressive mode never permits popups/new tabs.
+                if (!aggressive && isUserGesture && view != null) {
+                    WebView.HitTestResult hit = view.getHitTestResult();
+                    if (hit != null && hit.getExtra() != null) {
+                        view.loadUrl(hit.getExtra());
+                    }
+                } else if (isUserGesture) {
+                    toastBlocked();
+                }
                 return false;
             }
         });
@@ -205,13 +238,18 @@ public class BrowserActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 address.setText(url);
+                view.evaluateJavascript(
+                        "(function(){" +
+                        "try{" +
+                        "document.querySelectorAll('iframe[sandbox]').forEach(function(f){f.removeAttribute('sandbox');});" +
+                        "var h=location.hostname.toLowerCase();" +
+                        "if(h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com'){" +
+                        "document.querySelectorAll('a[target]').forEach(function(a){a.removeAttribute('target');});" +
+                        "}" +
+                        "}catch(e){}" +
+                        "})();", null);
                 if (aggressive) {
-                    view.evaluateJavascript(
-                            "(function(){"+
-                            "try{window.open=function(){return null;};"+
-                            "document.querySelectorAll('a[target]').forEach(function(a){a.removeAttribute('target');});"+
-                            "}catch(e){}"+
-                            "})();", null);
+                    stripOverlays(view);
                 }
                 injectDpadNavigation(view);
             }
@@ -247,6 +285,27 @@ public class BrowserActivity extends Activity {
         });
     }
 
+    private void stripOverlays(WebView view) {
+        view.evaluateJavascript(
+                "(function(){" +
+                "function clean(){" +
+                "try{" +
+                "document.querySelectorAll('iframe[sandbox]').forEach(function(f){f.removeAttribute('sandbox');});" +
+                "document.querySelectorAll('div,section,aside,a').forEach(function(el){" +
+                "if(el.querySelector('video,iframe'))return;" +
+                "var t=(el.innerText||'').toLowerCase();" +
+                "var s=window.getComputedStyle(el);" +
+                "var pos=s.position;" +
+                "var z=parseInt(s.zIndex,10)||0;" +
+                "if(t.indexOf('remove sandbox attributes')!==-1||t.indexOf('not a robot')!==-1||" +
+                "((pos==='fixed'||pos==='absolute')&&z>=999&&el.getBoundingClientRect().width>200)){" +
+                "el.remove();" +
+                "}});" +
+                "}catch(e){}}" +
+                "clean();setTimeout(clean,1500);setTimeout(clean,3500);" +
+                "})();", null);
+    }
+
     private void injectDpadNavigation(WebView view) {
         view.evaluateJavascript(
                 "(function(){" +
@@ -255,7 +314,7 @@ public class BrowserActivity extends Activity {
                 "st.textContent='.__aj_focus{outline:3px solid #D8E8FF !important;outline-offset:2px !important;background-color:rgba(49,76,119,0.55) !important;border-radius:5px !important;}';" +
                 "document.head.appendChild(st);}" +
                 "function vis(){" +
-                "return Array.prototype.slice.call(document.querySelectorAll('a[href],button,input,summary,[role=button]')).filter(function(el){" +
+                "return Array.prototype.slice.call(document.querySelectorAll('a[href],button,input,summary,video,[role=button],[onclick],[class*=close],[class*=play]')).filter(function(el){" +
                 "var r=el.getBoundingClientRect(),c=window.getComputedStyle(el);" +
                 "return r.width>4&&r.height>4&&c.visibility!=='hidden'&&c.display!=='none';});}" +
                 "function select(el){" +
@@ -274,9 +333,11 @@ public class BrowserActivity extends Activity {
                 "if(next<0){if(window.scrollY<=10)return 'TOP';window.scrollBy(0,-240);select(list[0]);return 'TOP_SCROLL';}" +
                 "if(next>=list.length){window.scrollBy(0,240);return 'END';}" +
                 "select(list[next]);return 'OK';};" +
-                "window.__ajClick=function(noTarget){" +
+                "window.__ajClick=function(){" +
                 "var el=window.__ajCur;if(!el)return;" +
-                "if(noTarget&&el.tagName==='A')el.removeAttribute('target');" +
+                "var h=location.hostname.toLowerCase();" +
+                "if((h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com')&&el.tagName==='A'){" +
+                "el.removeAttribute('target');}" +
                 "el.click();};" +
                 "if(!window.__ajCur&&location.hash){setTimeout(function(){window.__ajStep(1);},250);}" +
                 "})();", null);
