@@ -75,6 +75,7 @@ public class BrowserActivity extends Activity {
     private long lastCompatibility;
     private final List<WebView> popupSinks = new ArrayList<>();
     private AlertDialog dialog;
+    private ServiceWorkerController serviceWorkers;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -315,9 +316,14 @@ public class BrowserActivity extends Activity {
             }
         });
         if(Build.VERSION.SDK_INT >= 24) {
-            ServiceWorkerController.getInstance().setServiceWorkerClient(new ServiceWorkerClient() {
-                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) { return intercept(request); }
-            });
+            try {
+                serviceWorkers = ServiceWorkerController.getInstance();
+                serviceWorkers.setServiceWorkerClient(new ServiceWorkerClient() {
+                    @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) { return intercept(request); }
+                });
+            } catch(UnsupportedOperationException e) {
+                serviceWorkers = null; // Some WebView providers do not expose service-worker interception.
+            }
         }
     }
 
@@ -447,7 +453,7 @@ public class BrowserActivity extends Activity {
         fullscreenContainer.removeAllViews(); fullscreenContainer.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE); customView=null;
         WebChromeClient.CustomViewCallback callback=customViewCallback; customViewCallback=null;
-        cursor.setTarget(webView); if(callback!=null)callback.onCustomViewHidden(); hideSystemUi();
+        cursor.setTarget(webView); webView.requestFocus(); if(callback!=null)callback.onCustomViewHidden(); hideSystemUi();
     }
 
     private void showZoom() {
@@ -526,7 +532,7 @@ The retained Player compatibility option relaxes iframe sandbox attributes for e
     @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(!focused&&cursor!=null)cursor.stop();}
     @Override protected void onDestroy(){
         cursor.stop();if(dialog!=null)dialog.dismiss();flushCookies();
-        if(Build.VERSION.SDK_INT>=24)ServiceWorkerController.getInstance().setServiceWorkerClient(null);
+        if(Build.VERSION.SDK_INT>=24 && serviceWorkers!=null)serviceWorkers.setServiceWorkerClient(null);
         for(WebView sink:popupSinks)sink.destroy();popupSinks.clear();
         webView.removeJavascriptInterface("AJFilters");webView.stopLoading();root.removeView(webView);webView.destroy();super.onDestroy();
     }

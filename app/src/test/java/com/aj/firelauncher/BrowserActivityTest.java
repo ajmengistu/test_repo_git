@@ -35,7 +35,7 @@ public class BrowserActivityTest {
         root.measure(View.MeasureSpec.makeMeasureSpec(960,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(540,View.MeasureSpec.EXACTLY));
         root.layout(0,0,960,540);
     }
-    @After public void stop(){controller.pause().stop().destroy();}
+    @After public void stop(){if(controller!=null)controller.pause().stop().destroy();}
     private void key(int code){activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,code));activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,code));shadowOf(Looper.getMainLooper()).idle();}
     private View target(String tag){View v=root.findViewWithTag(tag);assertNotNull(tag,v);return v;}
 
