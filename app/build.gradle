@@ -65,6 +65,7 @@ def buildBlocker = tasks.register('buildBlocker', Exec) {
     inputs.file rootProject.file('native/blocker/Cargo.toml')
     inputs.file rootProject.file('native/blocker/Cargo.lock')
     outputs.dir layout.buildDirectory.dir('generated/blockerJni')
+    outputs.file rootProject.file('app/src/main/assets/licenses/native-dependencies.txt')
 }
 android.sourceSets.main.jniLibs.srcDir(layout.buildDirectory.dir('generated/blockerJni'))
 tasks.named('preBuild').configure { dependsOn buildBlocker }

@@ -246,7 +246,7 @@ public class BrowserActivity extends Activity {
         webView.addJavascriptInterface(new CosmeticBridge(),"AJFilters");
         webView.setWebChromeClient(new WebChromeClient() {
             @Override public boolean onCreateWindow(WebView view,boolean isDialog,boolean gesture,Message result) {
-                if (result == null || !(result.obj instanceof WebView.WebViewTransport)) return false;
+                if (result == null || !(result.obj instanceof WebView.WebViewTransport) || popupSinks.size() >= 2) return false;
                 // Preserve the real Window sink needed by some existing players; only user-initiated,
                 // non-blocked HTTP(S) destinations may replace the current page.
                 WebView sink = new WebView(BrowserActivity.this);
@@ -335,7 +335,7 @@ public class BrowserActivity extends Activity {
     public final class CosmeticBridge {
         @JavascriptInterface public String selectors(String url,String tokens) {
             // Read-only API: no activity, file, navigation or settings access from web content.
-            if(url == null || tokens == null || tokens.length() > 32768 || !http(url)
+            if(url == null || url.length() > 8192 || tokens == null || tokens.length() > 32768 || !http(url)
                     || !ContentBlocker.site(url).equals(ContentBlocker.site(pageUrl))
                     || allowedSites.containsKey(ContentBlocker.site(pageUrl))) return "[]";
             return blocker.selectors(url,tokens);
@@ -501,11 +501,13 @@ public class BrowserActivity extends Activity {
     }
     private void showNotices() {
         dialog=new AlertDialog.Builder(this).setTitle("Content blocking")
-            .setMessage("Brave adblock-rust engine (MPL-2.0), EasyList and EasyPrivacy (CC BY-SA 3.0), AdGuard Base (GPL-3.0). Bundled list snapshots; no Acceptable Ads subscription or background downloads. Some WebView traffic, advanced filter actions and first-party ads cannot be fully filtered.
+            .setMessage("""
+Brave adblock-rust engine (MPL-2.0), EasyList and EasyPrivacy (CC BY-SA 3.0), AdGuard Base (GPL-3.0). Bundled list snapshots; no Acceptable Ads subscription or background downloads. Some WebView traffic, advanced filter actions and first-party ads cannot be fully filtered.
 
 Cursor implementation informed by mrowser (MIT).
 
-The retained Player compatibility option relaxes iframe sandbox attributes for existing streaming players. Turn it off for untrusted sites. Full licenses and source links are included in the APK assets and repository THIRD_PARTY_NOTICES.md.")
+The retained Player compatibility option relaxes iframe sandbox attributes for existing streaming players. Turn it off for untrusted sites. Full licenses and source links are included in the APK assets and repository THIRD_PARTY_NOTICES.md.
+""")
             .setPositiveButton("Close",null).show();
     }
 
