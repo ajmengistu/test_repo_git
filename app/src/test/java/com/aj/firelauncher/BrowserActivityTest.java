@@ -7,6 +7,7 @@ import android.net.Uri;
 import android.content.Intent;
 import android.os.Looper;
 import android.view.KeyEvent;
+import android.view.InputDevice;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
@@ -76,6 +77,31 @@ public class BrowserActivityTest {
         key(KeyEvent.KEYCODE_MENU);
         assertEquals("Block: Off",((TextView)target("blocking")).getText().toString());
         activity.onBackPressed();assertEquals(View.GONE,target("browser-toolbar").getVisibility());assertFalse(activity.isFinishing());
+    }
+    @Test public void remoteSelectSendsOneFingerTapAtCursorPosition(){
+        BrowserCursor cursor=(BrowserCursor)target("cursor");
+        java.util.List<MotionEvent> taps=new java.util.ArrayList<>();
+        web.setOnTouchListener((v,e)->{taps.add(MotionEvent.obtain(e));return true;});
+        try {
+            for(int code:new int[]{KeyEvent.KEYCODE_DPAD_CENTER,KeyEvent.KEYCODE_ENTER}) {
+                activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,code));
+                assertTrue(taps.isEmpty());
+                activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,code));
+                assertEquals(2,taps.size());
+                assertEquals(MotionEvent.ACTION_DOWN,taps.get(0).getAction());
+                assertEquals(MotionEvent.ACTION_UP,taps.get(1).getAction());
+                assertEquals(taps.get(0).getDownTime(),taps.get(1).getDownTime());
+                for(MotionEvent tap:taps) {
+                    assertEquals(InputDevice.SOURCE_TOUCHSCREEN,tap.getSource());
+                    assertEquals(MotionEvent.TOOL_TYPE_FINGER,tap.getToolType(0));
+                    assertEquals(0,tap.getButtonState());
+                    assertEquals(cursor.cursorX()*web.getWidth()/cursor.getWidth(),tap.getX(),0.01f);
+                    assertEquals(cursor.cursorY()*web.getHeight()/cursor.getHeight(),tap.getY(),0.01f);
+                }
+                for(MotionEvent tap:taps)tap.recycle();
+                taps.clear();
+            }
+        } finally { for(MotionEvent tap:taps)tap.recycle(); }
     }
     @Test public void siteZoomAndFontAreIndependentAndPersist(){
         key(KeyEvent.KEYCODE_MENU);target("zoom").performClick();
