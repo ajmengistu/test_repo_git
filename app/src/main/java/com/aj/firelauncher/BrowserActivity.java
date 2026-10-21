@@ -384,7 +384,7 @@ public class BrowserActivity extends Activity {
         updateStatus();
     }
     private void load(String url) {
-        showToolbar(false); applySite(url); webView.setInitialScale(0); webView.loadUrl(url);
+        pageUrl = url; showToolbar(false); applySite(url); webView.setInitialScale(0); webView.loadUrl(url);
     }
     private void navigate(String raw) {
         String value = raw == null ? "" : raw.trim();
