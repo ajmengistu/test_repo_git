@@ -93,8 +93,10 @@ final class BrowserCursor extends View {
         if (target == null) return;
         hover();
         long now = SystemClock.uptimeMillis();
-        send(MotionEvent.ACTION_DOWN, now, now, MotionEvent.BUTTON_PRIMARY, 0, 0);
-        send(MotionEvent.ACTION_UP, now, now + 40, 0, 0, 0);
+        // Fire TV WebView reliably activates links with a native finger tap.
+        // Mouse DOWN/UP alone omits the mouse button press/release sequence.
+        send(MotionEvent.ACTION_DOWN, now, now, 0, 0, 0);
+        send(MotionEvent.ACTION_UP, now, SystemClock.uptimeMillis(), 0, 0, 0);
     }
 
     private void hover() { long t = SystemClock.uptimeMillis(); send(MotionEvent.ACTION_HOVER_MOVE,t,t,0,0,0); }
@@ -106,7 +108,8 @@ final class BrowserCursor extends View {
         if (target == null || getWidth() == 0) return;
         MotionEvent.PointerProperties properties = new MotionEvent.PointerProperties();
         properties.id = 0;
-        properties.toolType = MotionEvent.TOOL_TYPE_MOUSE;
+        boolean tap = action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_UP;
+        properties.toolType = tap ? MotionEvent.TOOL_TYPE_FINGER : MotionEvent.TOOL_TYPE_MOUSE;
         MotionEvent.PointerCoords coords = new MotionEvent.PointerCoords();
         coords.x = x * target.getWidth() / getWidth();
         coords.y = y * target.getHeight() / getHeight();
@@ -116,7 +119,7 @@ final class BrowserCursor extends View {
         coords.setAxisValue(MotionEvent.AXIS_VSCROLL, vertical);
         MotionEvent event = MotionEvent.obtain(down,time,action,1,
                 new MotionEvent.PointerProperties[]{properties},new MotionEvent.PointerCoords[]{coords},
-                0,buttons,1,1,0,0,InputDevice.SOURCE_MOUSE,0);
+                0,buttons,1,1,0,0,tap ? InputDevice.SOURCE_TOUCHSCREEN : InputDevice.SOURCE_MOUSE,0);
         if (action == MotionEvent.ACTION_SCROLL || action == MotionEvent.ACTION_HOVER_MOVE)
             target.dispatchGenericMotionEvent(event);
         else target.dispatchTouchEvent(event);
