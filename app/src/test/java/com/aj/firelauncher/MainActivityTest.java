@@ -110,6 +110,7 @@ public class MainActivityTest {
         AlertDialog dialog = ShadowAlertDialog.getLatestAlertDialog();
         assertTrue(dialog.isShowing());
         dialog.getListView().performItemClick(null, 0, 0);
+        settle();
         assertEquals(Settings.ACTION_SETTINGS, shadowOf(activity).getNextStartedActivity().getAction());
         assertTrue(target("settings").hasFocus());
         key(KeyEvent.KEYCODE_DPAD_DOWN);
@@ -205,7 +206,8 @@ public class MainActivityTest {
                 .putString("favorite_packages_v2", favorites.toString()).commit();
         resume();
         for (int i = 0; i < 12; i++) key(KeyEvent.KEYCODE_DPAD_RIGHT);
-        View focused = activity.getCurrentFocus();
+        View focused = root().findFocus();
+        assertNotNull("Favorite retains focus after pagination", focused);
         String key = (String) focused.getTag();
         assertTrue(key.startsWith("favorite:"));
         assertNull(find("missing:Prime Video"));
@@ -279,11 +281,12 @@ public class MainActivityTest {
     }
     private View root() { return ((ViewGroup) activity.findViewById(android.R.id.content)).getChildAt(0); }
     private void layout(int width, int height) {
+        settle();
+        // Measure the home itself; pending decor traversals use the simulated display size.
         for (int pass = 0; pass < 3; pass++) {
             root().measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY));
             root().layout(0, 0, width, height);
-            settle();
         }
     }
     private View find(String key) { return root().findViewWithTag(key); }
