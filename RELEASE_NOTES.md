@@ -1,9 +1,9 @@
-AJ Launcher & AJ Browser v0.6:
+AJ Launcher & AJ Browser v0.6.1:
 
-- Fixed-viewport TV home screen with looping D-pad section/item navigation, pagination, and persistent focus restoration.
-- Amazon Silk-style D-pad mouse cursor in AJ Browser with smooth frame-based acceleration, edge auto-scrolling, scroll mode for long pages, hover support, native dropdowns, Fire TV keyboard text entry, and HTML5 fullscreen video.
-- Desktop-first WebView rendering with automatic fit-to-screen overview, default 90% page zoom, per-site zoom (75%–125%), independent text scaling (75%–150%), desktop/mobile switching, local bookmarks, and bounded history.
-- Source-built Brave `adblock-rust` content-blocking engine with bundled EasyList, EasyPrivacy, and AdGuard Base snapshots (network request interception + CSS cosmetic hiding, no Acceptable Ads by default, per-site session pause).
-- Compact Menu-toggled near-black browser toolbar for maximum webpage viewing area.
+- Fix remote center-button and Enter clicks on webpage links by sending a native tap at the cursor position.
+- Applies to AJ Browser, IMDb, Streaming Sites, and Live Sports.
+- Includes regression coverage for tap event type and cursor coordinates.
 
-Downloader URL: https://github.com/ajmengistu/test_repo_git/releases/download/v0.6/AJ-Launcher-v0.6.apk
+Install over v0.6 using the existing release signing key. Physical Fire TV verification is still needed.
+
+Downloader URL: https://github.com/ajmengistu/test_repo_git/releases/download/v0.6.1/AJ-Launcher-v0.6.1.apk
