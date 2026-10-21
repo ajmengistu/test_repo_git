@@ -165,6 +165,21 @@ public class MainActivityTest {
     }
 
     @Test
+    public void remoteLongSelectTogglesFavoriteWithoutLaunchingApp() {
+        installApps(3);
+        resume();
+        key(KeyEvent.KEYCODE_DPAD_UP);
+        activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER));
+        activity.dispatchKeyEvent(new KeyEvent(0, 0, KeyEvent.ACTION_DOWN,
+                KeyEvent.KEYCODE_DPAD_CENTER, 1, 0, -1, 0, KeyEvent.FLAG_LONG_PRESS));
+        activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER));
+        settle();
+        assertNull(shadowOf(activity).getNextStartedActivity());
+        key(KeyEvent.KEYCODE_DPAD_DOWN);
+        assertNotNull(target("favorite:example.app00"));
+    }
+
+    @Test
     public void allPagesAndPagerControlsAreRemoteReachable() {
         installApps(40);
         resume();

@@ -71,6 +71,7 @@ public class MainActivity extends Activity {
     private TextView next;
     private TextView settings;
     private AlertDialog toolsDialog;
+    private boolean longSelectHandled;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -433,6 +434,7 @@ public class MainActivity extends Activity {
         labelLp.topMargin = dp(8);
         tile.addView(name, labelLp);
         if (item.packageName != null) tile.setOnLongClickListener(v -> {
+            longSelectHandled = true;
             toggleFavorite(item.packageName);
             return true;
         });
@@ -481,6 +483,27 @@ public class MainActivity extends Activity {
         if (key == KeyEvent.KEYCODE_MENU) {
             if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) showTools();
             return true;
+        }
+        boolean select = key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER
+                || key == KeyEvent.KEYCODE_NUMPAD_ENTER;
+        if (select) {
+            View focused = getWindow().getDecorView().findFocus();
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (event.getRepeatCount() == 0) longSelectHandled = false;
+                if (event.isLongPress() && focused != null && focused.isLongClickable()) {
+                    if (!longSelectHandled) focused.performLongClick();
+                    return true;
+                }
+            } else if (event.getAction() == KeyEvent.ACTION_UP && longSelectHandled) {
+                // Fire OS can send a long-press repeat before View's hold timer fires.
+                // Consume its release so a favorite edit never also launches the app.
+                if (focused != null) {
+                    focused.cancelLongPress();
+                    focused.setPressed(false);
+                }
+                longSelectHandled = false;
+                return true;
+            }
         }
         if (!directional) return super.dispatchKeyEvent(event);
         if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
