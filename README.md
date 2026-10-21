@@ -1,17 +1,17 @@
 # AJ Launcher for Fire TV
 
-Minimal navy/blue home screen for Fire OS 7 and Android TV (Android 6+).
+Minimal near-black home screen for Fire OS 7 and Android TV (Android 6+).
 
-## v0.4
+## v0.5 home screen
 
-- Prime Video, Peacock and YouTube lead Favorites. Missing apps have a clear install message.
-- Streaming Sites and Live Sports open the exact FMHY section URLs inside AJ Browser.
-- All Apps starts collapsed. Press OK to expand/collapse, or Back to collapse.
-- Settings & Tools contains Fire TV Settings, AJ Browser, NordVPN and Home on Fire when installed.
-- Explicit D-pad neighbors, clear focus borders and focus restoration on app return/recreation.
-- Hold OK on other installed apps to add/remove favorites. The three primary favorites stay pinned.
-- The one-time v0.4 migration replaces the old automatic eight-app favorites list.
-- AJ Browser retains its v0.3 remote controls, Shields behavior, host blocklist, popup prevention and Brave Search home page. Brave Search is a website inside AJ Browser; no Brave browser app is launched.
+- Fixed viewport with Favorites, Explore and All Apps in a compact left rail.
+- Up/Down loops sections from the rail or content; Left/Right traverses tiles in reading order, continuing across grid rows and pages. Each section restores its last app and page.
+- Left at the first tile returns to the rail; Left again reaches the Settings gear. Right after the last tile reaches page controls (when present), then the gear. Menu also opens Settings & tools.
+- Back returns to the rail, then retraces section history. Returning from an app/browser and recreating the activity preserve selection.
+- Six or seven compact tiles per row at typical TV density; All Apps uses up to two rows per page. Extra favorites use single-row pages. No scrolling home container.
+- Prime Video, Peacock and YouTube remain pinned first. Hold OK on installed apps to customize other favorites. Existing preferences are retained.
+- Explore retains the exact FMHY and IMDb URLs and adds AJ Browser. Settings retains Fire TV Settings, AJ Browser, NordVPN and installed Home on Fire.
+- The embedded browser and its remote controls, privacy settings, cookies and filtering are unchanged.
 
 ## Install / update
 
@@ -48,7 +48,7 @@ The **Signed release** GitHub Actions workflow restores the persistent key from 
 
 The **Build APK** workflow produces an isolated debug preview (`com.aj.firelauncher.preview`) so it cannot replace the installed launcher. Production releases use `com.aj.firelauncher`. Debug builds are not update packages.
 
-Automated tests cover exact shortcut intents, browser popup settings, collapsed/expanded states, D-pad links and focus restoration. Physical Fire TV behavior, installed-app availability and live websites still depend on the device.
+Automated tests cover shortcut intents, browser popup settings, looping remote navigation, pagination, settings/tools access, installed-app launching, favorites, focus restoration and fixed viewport bounds. Physical Fire TV behavior, installed-app availability and live websites still depend on the device.
 
 ## Home button
 

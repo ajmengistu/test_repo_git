@@ -1,6 +1,7 @@
 package com.aj.firelauncher;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Intent;
@@ -21,12 +22,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
-import android.widget.FrameLayout;
-import android.widget.GridLayout;
-import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -43,34 +40,54 @@ public class MainActivity extends Activity {
     private static final String PREFS = "launcher_prefs";
     private static final String PREF_FAVORITE_PACKAGES = "favorite_packages_v2";
     private static final String PREF_V2_MIGRATED = "favorites_v4_migrated";
-
+    private static final String[] SECTIONS = {"Favorites", "Explore", "All Apps"};
+    private static final int TEXT = Color.rgb(250, 250, 250);
+    private static final int MUTED = Color.rgb(153, 153, 165);
+    private static final int ACCENT = Color.rgb(141, 219, 255);
     private final Handler clockHandler = new Handler();
-    private final SimpleDateFormat timeFormat = new SimpleDateFormat("h:mm", Locale.getDefault());
-    private final SimpleDateFormat dateFormat = new SimpleDateFormat("EEE, MMM d", Locale.getDefault());
-
-    private LinearLayout content;
-    private TextView clockView;
-    private TextView dateView;
-    private TextView focusTitle;
-    private TextView focusSubtitle;
+    private final SimpleDateFormat timeFormat = new SimpleDateFormat("h:mm a", Locale.getDefault());
     private SharedPreferences prefs;
     private final Map<String, AppEntry> appsByPackage = new LinkedHashMap<>();
-    private final Map<String, View> focusTargets = new LinkedHashMap<>();
-    private final List<List<View>> navigationRows = new ArrayList<>();
-    private String focusedKey = "favorite:prime video";
-    private boolean allAppsExpanded;
     private List<AppEntry> currentEntries = new ArrayList<>();
+    private final List<HomeItem> items = new ArrayList<>();
+    private final List<View> visibleTiles = new ArrayList<>();
+    private final TextView[] rail = new TextView[3];
+    private final String[] selectedKeys = {"", "", ""};
+    private final int[] selectedIndices = new int[3];
+    private final List<Integer> sectionHistory = new ArrayList<>();
+    private int section;
+    private int columns = 7;
+    private int rows = 2;
+    private int page;
+    private String focusArea = "content";
+    private LinearLayout tileArea;
+    private LinearLayout content;
+    private TextView clockView;
+    private TextView heading;
+    private TextView description;
+    private TextView focusInfo;
+    private TextView pageInfo;
+    private TextView previous;
+    private TextView next;
+    private TextView settings;
+    private AlertDialog toolsDialog;
 
     @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    protected void onCreate(Bundle state) {
+        super.onCreate(state);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         hideSystemUi();
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        if (savedInstanceState != null) {
-            focusedKey = savedInstanceState.getString("focusedKey", focusedKey);
-            allAppsExpanded = savedInstanceState.getBoolean("allAppsExpanded");
+        if (state != null) {
+            section = Math.max(0, Math.min(2, state.getInt("section")));
+            focusArea = state.getString("focusArea", "content");
+            for (int i = 0; i < 3; i++) {
+                selectedKeys[i] = state.getString("itemKey" + i, "");
+                selectedIndices[i] = state.getInt("itemIndex" + i);
+            }
+            int[] history = state.getIntArray("sectionHistory");
+            if (history != null) for (int value : history) sectionHistory.add(value);
         }
         buildUi();
     }
@@ -90,119 +107,184 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    public void onBackPressed() {
-        if (allAppsExpanded) {
-            allAppsExpanded = false;
-            focusedKey = "all-apps";
-            renderRows(currentEntries);
-        } else if (!navigationRows.isEmpty()) {
-            navigationRows.get(0).get(0).requestFocus();
-        }
+    protected void onDestroy() {
+        if (toolsDialog != null) toolsDialog.dismiss();
+        super.onDestroy();
     }
 
     @Override
     protected void onSaveInstanceState(Bundle state) {
-        state.putString("focusedKey", focusedKey);
-        state.putBoolean("allAppsExpanded", allAppsExpanded);
+        state.putInt("section", section);
+        state.putString("focusArea", focusArea);
+        for (int i = 0; i < 3; i++) {
+            state.putString("itemKey" + i, selectedKeys[i]);
+            state.putInt("itemIndex" + i, selectedIndices[i]);
+        }
+        int[] history = new int[sectionHistory.size()];
+        for (int i = 0; i < history.length; i++) history[i] = sectionHistory.get(i);
+        state.putIntArray("sectionHistory", history);
         super.onSaveInstanceState(state);
     }
 
-    private void buildUi() {
-        FrameLayout root = new FrameLayout(this);
-        root.setBackgroundResource(R.drawable.screen_bg);
+    @Override
+    public void onBackPressed() {
+        if (!"rail".equals(focusArea)) {
+            rail[section].requestFocus();
+        } else if (!sectionHistory.isEmpty()) {
+            section = sectionHistory.remove(sectionHistory.size() - 1);
+            renderSection(true);
+        } else {
+            // A launcher stays at its root rather than exiting into a blank home screen.
+            section = 0;
+            renderSection(false);
+        }
+    }
 
-        LinearLayout screenLayout = new LinearLayout(this);
-        screenLayout.setOrientation(LinearLayout.VERTICAL);
-        root.addView(screenLayout, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+    private TextView text(String value, int size, int color) {
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(size);
+        view.setTextColor(color);
+        view.setIncludeFontPadding(false);
+        view.setSingleLine(true);
+        view.setEllipsize(TextUtils.TruncateAt.END);
+        return view;
+    }
+
+    private void buildUi() {
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(28), dp(18), dp(28), dp(18));
+        root.setBackgroundResource(R.drawable.screen_bg);
+        root.setTag("home-root");
 
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setPadding(dp(40), dp(18), dp(40), dp(12));
-        screenLayout.addView(header, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        LinearLayout hero = new LinearLayout(this);
-        hero.setOrientation(LinearLayout.VERTICAL);
-        header.addView(hero, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView brand = new TextView(this);
-        brand.setText("AJ Home");
-        brand.setTextColor(Color.rgb(246, 248, 252));
-        brand.setTextSize(15);
+        root.addView(header, new LinearLayout.LayoutParams(-1, dp(48)));
+        TextView brand = text("AJ / TV", 16, TEXT);
         brand.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        hero.addView(brand);
+        header.addView(brand, new LinearLayout.LayoutParams(0, -2, 1f));
+        clockView = text("", 18, TEXT);
+        header.addView(clockView, new LinearLayout.LayoutParams(-2, -2));
+        settings = text("⚙", 26, TEXT);
+        settings.setGravity(Gravity.CENTER);
+        settings.setContentDescription("Settings and tools");
+        makeFocusable(settings, "settings", () -> showTools());
+        LinearLayout.LayoutParams gearLp = new LinearLayout.LayoutParams(dp(44), dp(40));
+        gearLp.leftMargin = dp(20);
+        header.addView(settings, gearLp);
 
-        focusTitle = new TextView(this);
-        focusTitle.setText("Favorites");
-        focusTitle.setTextColor(Color.WHITE);
-        focusTitle.setTextSize(26);
-        focusTitle.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        titleLp.topMargin = dp(2);
-        hero.addView(focusTitle, titleLp);
-
-        focusSubtitle = new TextView(this);
-        focusSubtitle.setText("Your most-used apps, one click away");
-        focusSubtitle.setTextColor(Color.rgb(190, 198, 211));
-        focusSubtitle.setTextSize(14);
-        LinearLayout.LayoutParams subtitleLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        subtitleLp.topMargin = dp(3);
-        hero.addView(focusSubtitle, subtitleLp);
-
-        LinearLayout clockBox = new LinearLayout(this);
-        clockBox.setOrientation(LinearLayout.VERTICAL);
-        clockBox.setGravity(Gravity.END);
-        header.addView(clockBox, new LinearLayout.LayoutParams(dp(240), ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        clockView = new TextView(this);
-        clockView.setTextColor(Color.WHITE);
-        clockView.setTextSize(30);
-        clockView.setGravity(Gravity.END);
-        clockView.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        clockBox.addView(clockView);
-
-        dateView = new TextView(this);
-        dateView.setTextColor(Color.rgb(190, 198, 211));
-        dateView.setTextSize(14);
-        dateView.setGravity(Gravity.END);
-        clockBox.addView(dateView);
-
-        ScrollView verticalScroll = new ScrollView(this);
-        verticalScroll.setFillViewport(true);
-        verticalScroll.setVerticalScrollBarEnabled(false);
-        verticalScroll.setClipToPadding(false);
-        screenLayout.addView(verticalScroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        LinearLayout body = new LinearLayout(this);
+        body.setPadding(0, dp(22), 0, dp(14));
+        root.addView(body, new LinearLayout.LayoutParams(-1, 0, 1f));
+        LinearLayout navigation = new LinearLayout(this);
+        navigation.setOrientation(LinearLayout.VERTICAL);
+        navigation.setGravity(Gravity.CENTER_VERTICAL);
+        body.addView(navigation, new LinearLayout.LayoutParams(dp(120), -1));
+        for (int i = 0; i < 3; i++) {
+            final int index = i;
+            TextView entry = text(SECTIONS[i], 16, MUTED);
+            entry.setGravity(Gravity.CENTER_VERTICAL);
+            entry.setPadding(dp(12), 0, dp(8), 0);
+            makeFocusable(entry, "rail:" + i, () -> {
+                if (section != index) switchSection(index, true);
+                focusContent();
+            });
+            entry.setOnFocusChangeListener((v, focused) -> {
+                if (focused) {
+                    focusArea = "rail";
+                    if (section != index) switchSection(index, true);
+                }
+                updateRail();
+            });
+            rail[i] = entry;
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, dp(46));
+            lp.bottomMargin = dp(8);
+            navigation.addView(entry, lp);
+        }
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(40), dp(6), dp(40), dp(32));
-        verticalScroll.addView(content, new ScrollView.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT));
-
+        LinearLayout.LayoutParams contentLp = new LinearLayout.LayoutParams(0, -1, 1f);
+        contentLp.leftMargin = dp(24);
+        body.addView(content, contentLp);
+        heading = text("", 26, TEXT);
+        heading.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        content.addView(heading, new LinearLayout.LayoutParams(-1, dp(36)));
+        description = text("", 13, MUTED);
+        content.addView(description, new LinearLayout.LayoutParams(-1, dp(26)));
+        tileArea = new LinearLayout(this);
+        tileArea.setOrientation(LinearLayout.VERTICAL);
+        tileArea.setGravity(Gravity.CENTER_VERTICAL);
+        tileArea.setPadding(dp(4), dp(4), dp(4), dp(4));
+        content.addView(tileArea, new LinearLayout.LayoutParams(-1, 0, 1f));
+        tileArea.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l <= 0 || b - t <= 0) return;
+            int newColumns = Math.max(1, Math.min(7, (r - l - dp(8)) / dp(100)));
+            int newRows = Math.max(1, Math.min(2, (b - t - dp(8)) / dp(120)));
+            if (newColumns != columns || newRows != rows) {
+                columns = newColumns;
+                rows = newRows;
+                renderSection(false);
+            }
+        });
+        LinearLayout pager = new LinearLayout(this);
+        pager.setGravity(Gravity.CENTER_VERTICAL);
+        content.addView(pager, new LinearLayout.LayoutParams(-1, dp(40)));
+        focusInfo = text("", 14, MUTED);
+        pager.addView(focusInfo, new LinearLayout.LayoutParams(0, -2, 1f));
+        previous = text("‹", 24, TEXT);
+        previous.setGravity(Gravity.CENTER);
+        makeFocusable(previous, "previous", () -> changePage(-1));
+        previous.setContentDescription("Previous page");
+        pager.addView(previous, new LinearLayout.LayoutParams(dp(40), -1));
+        pageInfo = text("", 13, MUTED);
+        pageInfo.setGravity(Gravity.CENTER);
+        pager.addView(pageInfo, new LinearLayout.LayoutParams(dp(76), -2));
+        next = text("›", 24, TEXT);
+        next.setGravity(Gravity.CENTER);
+        makeFocusable(next, "next", () -> changePage(1));
+        next.setContentDescription("Next page");
+        pager.addView(next, new LinearLayout.LayoutParams(dp(40), -1));
+        TextView help = text("↑ ↓  Sections     ← →  Items     OK  Open     Hold OK  Favorite     Menu  Settings", 12, MUTED);
+        root.addView(help, new LinearLayout.LayoutParams(-1, dp(24)));
         setContentView(root);
+    }
+
+    private void makeFocusable(View view, String key, Runnable action) {
+        view.setId(View.generateViewId());
+        view.setTag(key);
+        view.setFocusable(true);
+        view.setFocusableInTouchMode(true);
+        view.setBackgroundResource(R.drawable.tile_normal);
+        view.setOnClickListener(v -> action.run());
+        view.setOnFocusChangeListener((v, focused) -> {
+            v.setBackgroundResource(focused ? R.drawable.tile_focused : R.drawable.tile_normal);
+            if (focused) focusArea = key;
+        });
+    }
+
+    private void updateRail() {
+        for (int i = 0; i < rail.length; i++) {
+            if (rail[i] == null) continue;
+            boolean active = i == section;
+            rail[i].setSelected(active);
+            rail[i].setTextColor(active ? TEXT : MUTED);
+            rail[i].setBackgroundResource(rail[i].hasFocus() ? R.drawable.tile_focused
+                    : active ? R.drawable.nav_selected : android.R.color.transparent);
+        }
     }
 
     private void refreshApps() {
         appsByPackage.clear();
         PackageManager pm = getPackageManager();
-
-        // Launcher first, Leanback second so TV-specific activities win.
+        // Prefer the TV activity when a package also exposes a phone launcher activity.
         queryCategory(pm, Intent.CATEGORY_LAUNCHER);
         queryCategory(pm, Intent.CATEGORY_LEANBACK_LAUNCHER);
-
-        List<AppEntry> entries = new ArrayList<>(appsByPackage.values());
-        Collections.sort(entries, (a, b) ->
-                a.label.toLowerCase(Locale.getDefault()).compareTo(b.label.toLowerCase(Locale.getDefault())));
-
-        migrateFavoritesIfNeeded(entries);
-        renderRows(entries);
+        currentEntries = new ArrayList<>(appsByPackage.values());
+        Collections.sort(currentEntries, (a, b) -> a.label.compareToIgnoreCase(b.label));
+        migrateFavoritesIfNeeded(currentEntries);
+        renderSection(false);
     }
 
     private void queryCategory(PackageManager pm, String category) {
@@ -231,152 +313,237 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void renderRows(List<AppEntry> entries) {
-        currentEntries = entries;
-        String restoreKey = focusedKey;
-        focusTargets.clear();
-        navigationRows.clear();
-        content.removeAllViews();
-
-        List<String> favorites = getFavoritePackages();
-        addSectionTitle("Favorites", "Press OK to open · hold OK to customize");
-        LinearLayout favoritesRow = addRow(156);
-        for (String pkg : favorites) {
-            AppEntry entry = appsByPackage.get(pkg);
-            if (entry != null) {
-                addFavoriteTile(favoritesRow, entry);
-            } else if (pkg.startsWith("missing:")) {
-                String label = pkg.substring("missing:".length());
-                addActionTile(favoritesRow, label, "Not installed", android.R.drawable.ic_media_play,
-                        () -> showMissingApp(label));
-            }
+    private void switchSection(int target, boolean remember) {
+        if (target == section) return;
+        if (remember) {
+            if (sectionHistory.size() == 32) sectionHistory.remove(0);
+            sectionHistory.add(section);
         }
-        collectRow(favoritesRow);
+        section = target;
+        renderSection(true);
+    }
 
-        addSectionTitle("Explore", "Opens in AJ Browser");
-        LinearLayout webRow = addRow(106);
-        addActionTile(webRow, "Streaming Sites", "FMHY · movies & TV",
-                android.R.drawable.ic_menu_search,
-                () -> openBrowser("https://fmhy.net/video#streaming-sites"));
-        addActionTile(webRow, "Live Sports", "FMHY · live sports",
-                android.R.drawable.ic_media_play,
-                () -> openBrowser("https://fmhy.net/video#live-sports"));
-        addActionTile(webRow, "IMDb", "Watchlist & ratings",
-                android.R.drawable.btn_star_big_on,
-                () -> openBrowser("https://www.imdb.com/"));
-        collectRow(webRow);
-
-        LinearLayout toggleRow = addRow(88);
-        addActionTile(toggleRow, "All Apps", allAppsExpanded ? "▲ Collapse" : "▼ Expand",
-                android.R.drawable.ic_menu_sort_by_size, () -> {
-                    allAppsExpanded = !allAppsExpanded;
-                    focusedKey = "all-apps";
-                    renderRows(currentEntries);
-                });
-        View toggle = toggleRow.getChildAt(0);
-        registerTarget(toggle, "all-apps");
-        toggle.setContentDescription("All Apps, " + (allAppsExpanded ? "expanded" : "collapsed"));
-        collectRow(toggleRow);
-
-        if (allAppsExpanded) {
-            GridLayout grid = new GridLayout(this);
-            grid.setColumnCount(4);
-            grid.setUseDefaultMargins(false);
-            content.addView(grid, new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-            List<View> gridRow = new ArrayList<>();
-            for (AppEntry entry : entries) {
-                addGridTile(grid, entry, favorites.contains(entry.packageName));
-                gridRow.add(grid.getChildAt(grid.getChildCount() - 1));
-                if (gridRow.size() == 4) {
-                    navigationRows.add(gridRow);
-                    gridRow = new ArrayList<>();
+    private void renderSection(boolean animate) {
+        items.clear();
+        if (section == 0) {
+            for (String pkg : getFavoritePackages()) {
+                AppEntry app = appsByPackage.get(pkg);
+                if (app != null) addApp("favorite:", app);
+                else if (pkg.startsWith("missing:")) {
+                    String label = pkg.substring(8);
+                    items.add(new HomeItem(pkg, label, getDrawable(android.R.drawable.ic_media_play),
+                            "Not installed", () -> showMissingApp(label), null));
                 }
             }
-            if (!gridRow.isEmpty()) navigationRows.add(gridRow);
-        }
-
-        addSectionTitle("Settings & Tools", "");
-        LinearLayout toolsRow = addRow(106);
-        addSystemTile(toolsRow, "Settings", "Fire TV",
-                () -> openIntent(new Intent(Settings.ACTION_SETTINGS)), false);
-        addActionTile(
-                toolsRow,
-                "AJ Browser",
-                "Popup blocking enabled",
-                android.R.drawable.ic_menu_search,
-                () -> openIntent(new Intent(this, BrowserActivity.class)));
-
-        AppEntry nord = findAppByLabel("nordvpn");
-        if (nord != null) {
-            addToolAppTile(toolsRow, nord, "VPN");
+        } else if (section == 1) {
+            addShortcut("Streaming Sites", "https://fmhy.net/video#streaming-sites", android.R.drawable.ic_menu_search);
+            addShortcut("Live Sports", "https://fmhy.net/video#live-sports", android.R.drawable.ic_media_play);
+            items.add(new HomeItem("browser", "AJ Browser", getDrawable(android.R.drawable.ic_menu_search),
+                    "Brave Search", () -> openIntent(new Intent(this, BrowserActivity.class)), null));
+            addShortcut("IMDb", "https://www.imdb.com/", android.R.drawable.btn_star_big_on);
         } else {
-            addActionTile(
-                    toolsRow,
-                    "NordVPN",
-                    "Install from Amazon Appstore",
-                    android.R.drawable.ic_lock_lock,
-                    () -> Toast.makeText(this, "Install NordVPN from the Amazon Appstore, then it will appear here.", Toast.LENGTH_LONG).show());
+            for (AppEntry app : currentEntries) addApp("app:", app);
         }
-
-        AppEntry homeOnFire = findAppByLabel("home on fire");
-        if (homeOnFire != null) {
-            addToolAppTile(toolsRow, homeOnFire, "Home button");
+        int selected = Math.max(0, Math.min(selectedIndices[section], items.size() - 1));
+        for (int i = 0; i < items.size(); i++) {
+            if (items.get(i).key.equals(selectedKeys[section])) selected = i;
         }
-
-        collectRow(toolsRow);
-        wireNavigation();
-        content.post(() -> {
-            View target = focusTargets.get(restoreKey);
-            if (target == null && restoreKey.startsWith("grid:")) target = focusTargets.get("all-apps");
-            if (target == null) target = navigationRows.get(0).get(0);
-            target.requestFocus();
-        });
+        selectedIndices[section] = selected;
+        page = selected / pageSize();
+        heading.setText(SECTIONS[section]);
+        description.setText(section == 0 ? "Your favorites, one click away"
+                : section == 1 ? "Web shortcuts · opens in AJ Browser"
+                : "Installed apps · hold OK to add or remove a favorite");
+        renderPage();
+        updateRail();
+        if (animate) {
+            content.animate().cancel();
+            content.setAlpha(0.35f);
+            content.animate().alpha(1f).setDuration(180).start();
+        }
     }
 
-    private LinearLayout addRow(int height) {
-        HorizontalScrollView scroll = new HorizontalScrollView(this);
-        scroll.setHorizontalScrollBarEnabled(false);
-        scroll.setClipToPadding(false);
-        scroll.setClipChildren(false);
-        scroll.setTag(height);
-        content.addView(scroll, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(height)));
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setPadding(dp(6), dp(8), dp(12), dp(8));
-        row.setClipChildren(false);
-        scroll.addView(row, new HorizontalScrollView.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        return row;
+    private void addApp(String prefix, AppEntry app) {
+        items.add(new HomeItem(prefix + app.packageName, app.label, app.icon,
+                getFavoritePackages().contains(app.packageName) ? "Favorite · hold OK to customize" : "Hold OK to favorite",
+                () -> launch(app), app.packageName));
     }
 
-    private void collectRow(ViewGroup row) {
-        List<View> tiles = new ArrayList<>();
-        for (int index = 0; index < row.getChildCount(); index++) tiles.add(row.getChildAt(index));
-        if (!tiles.isEmpty()) navigationRows.add(tiles);
+    private void addShortcut(String label, String url, int icon) {
+        items.add(new HomeItem("web:" + label, label, getDrawable(icon), "Open in AJ Browser",
+                () -> openBrowser(url), null));
     }
 
-    private void registerTarget(View tile, String key) {
-        tile.setId(View.generateViewId());
-        tile.setTag(key);
-        focusTargets.put(key, tile);
+    private int pageSize() {
+        return columns * (section == 2 ? rows : 1);
     }
 
-    private void wireNavigation() {
-        for (int rowIndex = 0; rowIndex < navigationRows.size(); rowIndex++) {
-            List<View> row = navigationRows.get(rowIndex);
-            List<View> above = navigationRows.get(Math.max(0, rowIndex - 1));
-            List<View> below = navigationRows.get(Math.min(navigationRows.size() - 1, rowIndex + 1));
-            for (int column = 0; column < row.size(); column++) {
-                View tile = row.get(column);
-                tile.setNextFocusLeftId(row.get(Math.max(0, column - 1)).getId());
-                tile.setNextFocusRightId(row.get(Math.min(row.size() - 1, column + 1)).getId());
-                tile.setNextFocusUpId(above.get(Math.min(column, above.size() - 1)).getId());
-                tile.setNextFocusDownId(below.get(Math.min(column, below.size() - 1)).getId());
+    private int pageCount() {
+        return Math.max(1, (items.size() + pageSize() - 1) / pageSize());
+    }
+
+    private void renderPage() {
+        // Removing focused views can trigger framework focus search; preserve our logical location.
+        String restoreArea = focusArea;
+        tileArea.removeAllViews();
+        visibleTiles.clear();
+        int start = page * pageSize();
+        int end = Math.min(items.size(), start + pageSize());
+        int rowCount = Math.max(1, (end - start + columns - 1) / columns);
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++) {
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            int available = tileArea.getHeight() - dp(8);
+            int height = available > 0 ? Math.min(dp(116), available / rowCount) : dp(116);
+            tileArea.addView(row, new LinearLayout.LayoutParams(-1, height));
+            for (int col = 0; col < columns; col++) {
+                int index = start + rowIndex * columns + col;
+                View tile = index < end ? createTile(items.get(index), index) : new View(this);
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -1, 1f);
+                lp.setMargins(dp(4), dp(4), dp(4), dp(4));
+                row.addView(tile, lp);
+                if (index < end) visibleTiles.add(tile);
             }
         }
+        if (items.isEmpty()) {
+            tileArea.removeAllViews();
+            tileArea.addView(text("No launchable apps installed", 16, MUTED));
+        }
+        pageInfo.setText((page + 1) + " / " + pageCount());
+        previous.setVisibility(pageCount() > 1 ? View.VISIBLE : View.GONE);
+        next.setVisibility(pageCount() > 1 ? View.VISIBLE : View.GONE);
+        focusArea = restoreArea;
+        restoreFocus();
+    }
+
+    private View createTile(HomeItem item, int index) {
+        LinearLayout tile = new LinearLayout(this);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER);
+        tile.setPadding(dp(4), dp(8), dp(4), dp(8));
+        makeFocusable(tile, item.key, item.action);
+        tile.setContentDescription(item.label + ", " + item.hint);
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(item.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        tile.addView(icon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+        TextView name = text(item.label, 14, TEXT);
+        name.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams labelLp = new LinearLayout.LayoutParams(-1, dp(24));
+        labelLp.topMargin = dp(8);
+        tile.addView(name, labelLp);
+        if (item.packageName != null) tile.setOnLongClickListener(v -> {
+            toggleFavorite(item.packageName);
+            return true;
+        });
+        tile.setOnFocusChangeListener((v, focused) -> {
+            v.setBackgroundResource(focused ? R.drawable.tile_focused : R.drawable.tile_normal);
+            v.animate().scaleX(focused ? 1.025f : 1f).scaleY(focused ? 1.025f : 1f).setDuration(160).start();
+            if (focused) {
+                focusArea = "content";
+                selectedKeys[section] = item.key;
+                selectedIndices[section] = index;
+                focusInfo.setText(item.label + " · " + item.hint);
+            }
+        });
+        return tile;
+    }
+
+    private void restoreFocus() {
+        if ("settings".equals(focusArea)) settings.requestFocus();
+        else if ("rail".equals(focusArea)) rail[section].requestFocus();
+        else focusContent();
+    }
+
+    private void focusContent() {
+        if (visibleTiles.isEmpty()) rail[section].requestFocus();
+        else {
+            int local = Math.max(0, Math.min(visibleTiles.size() - 1,
+                    selectedIndices[section] - page * pageSize()));
+            visibleTiles.get(local).requestFocus();
+        }
+    }
+
+    private void changePage(int direction) {
+        if (pageCount() <= 1) return;
+        page = (page + direction + pageCount()) % pageCount();
+        selectedIndices[section] = page * pageSize();
+        selectedKeys[section] = items.get(selectedIndices[section]).key;
+        focusArea = "content";
+        renderPage();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        int key = event.getKeyCode();
+        boolean directional = key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN
+                || key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT;
+        if (key == KeyEvent.KEYCODE_MENU) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) showTools();
+            return true;
+        }
+        if (!directional) return super.dispatchKeyEvent(event);
+        if (event.getAction() != KeyEvent.ACTION_DOWN) return true;
+        if ("settings".equals(focusArea)) {
+            if (key == KeyEvent.KEYCODE_DPAD_LEFT) rail[section].requestFocus();
+            else focusContent();
+        } else if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN) {
+            switchSection((section + (key == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : 2)) % 3, true);
+        } else if ("rail".equals(focusArea)) {
+            if (key == KeyEvent.KEYCODE_DPAD_LEFT) settings.requestFocus();
+            else focusContent();
+        } else if ("previous".equals(focusArea) || "next".equals(focusArea)) {
+            if (key == KeyEvent.KEYCODE_DPAD_LEFT) {
+                if ("next".equals(focusArea)) previous.requestFocus();
+                else focusContent();
+            } else if ("previous".equals(focusArea)) next.requestFocus();
+            else settings.requestFocus();
+        } else {
+            int direction = key == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 1;
+            int index = selectedIndices[section] + direction;
+            if (index < 0) rail[section].requestFocus();
+            else if (index >= items.size()) {
+                if (pageCount() > 1) previous.requestFocus();
+                else settings.requestFocus();
+            } else {
+                selectedIndices[section] = index;
+                selectedKeys[section] = items.get(index).key;
+                if (index / pageSize() != page) {
+                    page = index / pageSize();
+                    renderPage();
+                } else focusContent();
+            }
+        }
+        return true;
+    }
+
+    private void showTools() {
+        if (toolsDialog != null && toolsDialog.isShowing()) return;
+        focusArea = "settings";
+        settings.requestFocus();
+        List<String> labels = new ArrayList<>();
+        List<Runnable> actions = new ArrayList<>();
+        labels.add("Fire TV Settings");
+        actions.add(() -> openIntent(new Intent(Settings.ACTION_SETTINGS)));
+        labels.add("AJ Browser");
+        actions.add(() -> openIntent(new Intent(this, BrowserActivity.class)));
+        AppEntry nord = findAppByLabel("nordvpn");
+        labels.add(nord == null ? "NordVPN · not installed" : "NordVPN");
+        actions.add(() -> {
+            if (nord == null) showMissingApp("NordVPN");
+            else launch(nord);
+        });
+        AppEntry home = findAppByLabel("home on fire");
+        if (home != null) {
+            labels.add("Home on Fire");
+            actions.add(() -> launch(home));
+        }
+        toolsDialog = new AlertDialog.Builder(this).setTitle("Settings & tools")
+                .setItems(labels.toArray(new String[0]), (dialog, which) -> actions.get(which).run())
+                .setNegativeButton("Close", (dialog, which) -> { })
+                .create();
+        toolsDialog.setOnDismissListener(dialog -> settings.requestFocus());
+        toolsDialog.show();
     }
 
     private void openBrowser(String url) {
@@ -387,91 +554,22 @@ public class MainActivity extends Activity {
         Toast.makeText(this, "Install " + label + " from the Amazon Appstore.", Toast.LENGTH_LONG).show();
     }
 
-    private void addSectionTitle(String titleText, String helperText) {
-        LinearLayout sectionHeader = new LinearLayout(this);
-        sectionHeader.setOrientation(LinearLayout.HORIZONTAL);
-        sectionHeader.setGravity(Gravity.CENTER_VERTICAL);
+    private static final class HomeItem {
+        final String key;
+        final String label;
+        final Drawable icon;
+        final String hint;
+        final Runnable action;
+        final String packageName;
 
-        LinearLayout.LayoutParams headerLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        headerLp.topMargin = dp(14);
-        headerLp.bottomMargin = dp(7);
-        content.addView(sectionHeader, headerLp);
-
-        TextView title = new TextView(this);
-        title.setText(titleText);
-        title.setTextColor(Color.rgb(246, 248, 252));
-        title.setTextSize(20);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        sectionHeader.addView(title, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        TextView helper = new TextView(this);
-        helper.setText(helperText);
-        helper.setTextColor(Color.rgb(156, 168, 186));
-        helper.setTextSize(12);
-        LinearLayout.LayoutParams helperLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        helperLp.leftMargin = dp(14);
-        sectionHeader.addView(helper, helperLp);
-    }
-
-    private void addFavoriteTile(LinearLayout row, AppEntry entry) {
-        View tile = createTile(entry.label, entry.icon, "Favorite", true);
-        registerTarget(tile, "favorite:" + entry.packageName);
-        bindAppTile(tile, entry);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(tileWidth(3), dp(136));
-        lp.rightMargin = dp(12);
-        row.addView(tile, lp);
-    }
-
-    private void addGridTile(GridLayout grid, AppEntry entry, boolean favorite) {
-        View tile = createTile(entry.label, entry.icon, favorite ? "Favorite" : null, false);
-        registerTarget(tile, "grid:" + entry.packageName);
-        bindAppTile(tile, entry);
-
-        GridLayout.LayoutParams lp = new GridLayout.LayoutParams();
-        lp.width = tileWidth(4);
-        lp.height = dp(92);
-        lp.setMargins(dp(6), dp(6), dp(6), dp(6));
-        grid.addView(tile, lp);
-    }
-
-    private void bindAppTile(View tile, AppEntry entry) {
-        tile.setOnClickListener(v -> launch(entry));
-        tile.setOnLongClickListener(v -> {
-            toggleFavorite(entry.packageName);
-            return true;
-        });
-    }
-
-    private void addSystemTile(LinearLayout row, String title, String subtitle, Runnable action, boolean large) {
-        addActionTile(row, title, subtitle, android.R.drawable.ic_menu_manage, action);
-    }
-
-    private void addActionTile(LinearLayout row, String title, String subtitle, int iconRes, Runnable action) {
-        Drawable icon = getDrawable(iconRes);
-        int rowHeight = (Integer) ((View) row.getParent()).getTag();
-        boolean isFavoriteRow = rowHeight == 156;
-        View tile = createTile(title, icon, subtitle, isFavoriteRow);
-        registerTarget(tile, "action:" + title);
-        tile.setOnClickListener(v -> action.run());
-        if (rowHeight == 88) tile.findViewWithTag("icon").setVisibility(View.GONE);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                tileWidth(3),
-                dp(rowHeight - 20));
-        lp.rightMargin = dp(12);
-        row.addView(tile, lp);
-    }
-
-    private void addToolAppTile(LinearLayout row, AppEntry entry, String subtitle) {
-        addActionTile(row, entry.label, subtitle, android.R.drawable.ic_menu_manage, () -> launch(entry));
-        ImageView icon = row.getChildAt(row.getChildCount() - 1).findViewWithTag("icon");
-        icon.setImageDrawable(entry.icon);
-    }
-
-    private int tileWidth(int columns) {
-        return (getResources().getDisplayMetrics().widthPixels - dp(92)) / columns - dp(12);
+        HomeItem(String key, String label, Drawable icon, String hint, Runnable action, String packageName) {
+            this.key = key;
+            this.label = label;
+            this.icon = icon;
+            this.hint = hint;
+            this.action = action;
+            this.packageName = packageName;
+        }
     }
 
     private AppEntry findAppByLabel(String needle) {
@@ -489,87 +587,6 @@ public class MainActivity extends Activity {
         return null;
     }
 
-    private View createTile(String title, Drawable icon, String badge, boolean large) {
-        LinearLayout tile = new LinearLayout(this);
-        tile.setOrientation(large ? LinearLayout.VERTICAL : LinearLayout.HORIZONTAL);
-        tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(
-                dp(large ? 20 : 18),
-                dp(14),
-                dp(large ? 20 : 18),
-                dp(large ? 18 : 16));
-        tile.setFocusable(true);
-        tile.setFocusableInTouchMode(true);
-        tile.setBackgroundResource(R.drawable.tile_normal);
-        tile.setElevation(dp(2));
-
-        ImageView iconView = new ImageView(this);
-        iconView.setTag("icon");
-        iconView.setImageDrawable(icon);
-        iconView.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        int iconSize = large ? 46 : 32;
-        tile.addView(iconView, new LinearLayout.LayoutParams(dp(iconSize), dp(iconSize)));
-
-        LinearLayout labels = new LinearLayout(this);
-        labels.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams labelsLp = new LinearLayout.LayoutParams(
-                large ? ViewGroup.LayoutParams.MATCH_PARENT : 0, ViewGroup.LayoutParams.WRAP_CONTENT,
-                large ? 0f : 1f);
-        labelsLp.leftMargin = large ? 0 : dp(12);
-        tile.addView(labels, labelsLp);
-        TextView name = new TextView(this);
-        name.setText(title);
-        name.setTextColor(Color.rgb(246, 248, 252));
-        name.setTextSize(large ? 16 : 15);
-        name.setIncludeFontPadding(false);
-        name.setSingleLine(true);
-        name.setEllipsize(TextUtils.TruncateAt.END);
-        name.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        LinearLayout.LayoutParams nameLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        nameLp.topMargin = large ? dp(10) : 0;
-        labels.addView(name, nameLp);
-
-        if (badge != null) {
-            TextView badgeView = new TextView(this);
-            badgeView.setText(badge);
-            badgeView.setTextColor(Color.rgb(157, 191, 255));
-            badgeView.setTextSize(12);
-            badgeView.setIncludeFontPadding(false);
-            badgeView.setSingleLine(true);
-            badgeView.setEllipsize(TextUtils.TruncateAt.END);
-            LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            badgeLp.topMargin = dp(4);
-            labels.addView(badgeView, badgeLp);
-        }
-
-        tile.setOnFocusChangeListener((v, hasFocus) -> {
-            v.animate()
-                    .scaleX(hasFocus ? 1.055f : 1.0f)
-                    .scaleY(hasFocus ? 1.055f : 1.0f)
-                    .translationY(hasFocus ? -dp(3) : 0)
-                    .setDuration(105)
-                    .start();
-            v.setElevation(hasFocus ? dp(18) : dp(2));
-            v.setBackgroundResource(hasFocus ? R.drawable.tile_focused : R.drawable.tile_normal);
-
-            if (hasFocus) {
-                focusedKey = (String) v.getTag();
-                focusTitle.setText(title);
-                focusSubtitle.setText(badge == null ? "Press OK to open" : badge + " · press OK to open");
-
-                View parent = (View) v.getParent();
-                if (parent != null && parent.getParent() instanceof HorizontalScrollView) {
-                    HorizontalScrollView hsv = (HorizontalScrollView) parent.getParent();
-                    hsv.smoothScrollTo(Math.max(0, v.getLeft() - dp(50)), 0);
-                }
-            }
-        });
-
-        return tile;
-    }
-
     private void launch(AppEntry entry) {
         Intent intent = new Intent(Intent.ACTION_MAIN);
         intent.addCategory(Intent.CATEGORY_LAUNCHER);
@@ -581,13 +598,19 @@ public class MainActivity extends Activity {
     private void openIntent(Intent intent) {
         try {
             startActivity(intent);
-        } catch (ActivityNotFoundException e) {
+        } catch (ActivityNotFoundException | SecurityException e) {
             Toast.makeText(this, "Unable to open this item.", Toast.LENGTH_SHORT).show();
         }
     }
 
     private void migrateFavoritesIfNeeded(List<AppEntry> entries) {
         if (prefs.getBoolean(PREF_V2_MIGRATED, false)) return;
+
+        // Keep configured favorites from earlier installs, including absent packages.
+        if (!prefs.getString(PREF_FAVORITE_PACKAGES, "").trim().isEmpty()) {
+            prefs.edit().putBoolean(PREF_V2_MIGRATED, true).apply();
+            return;
+        }
 
         String[] desiredOrder = {
                 "prime video",
@@ -671,7 +694,6 @@ public class MainActivity extends Activity {
             public void run() {
                 Date now = new Date();
                 clockView.setText(timeFormat.format(now));
-                dateView.setText(dateFormat.format(now));
                 clockHandler.postDelayed(this, 30_000);
             }
         };
