@@ -1,0 +1,10 @@
+! AJ Browser supplemental cosmetic rules. No acceptable-ads subscription.
+! Preserve the existing targeted IMDb/Amazon ad-slot cleanup, without removing menus or dialogs.
+imdb.com###top_ad
+imdb.com###top_ad_wrapper
+imdb.com###bottom_ad_wrapper
+imdb.com##[data-testid*="ad-slot"]
+imdb.com##[data-testid*="nas-slot"]
+imdb.com##[data-testid*="sponsored"]
+imdb.com##[aria-label="Advertisement"]
+amazon.com##[data-component-type="sp-sponsored-result"]

@@ -10,8 +10,8 @@ android {
         applicationId 'com.aj.firelauncher'
         minSdk 23
         targetSdk 28
-        versionCode 5
-        versionName '0.5.0'
+        versionCode 6
+        versionName '0.6.0'
     }
 
     signingConfigs {
@@ -56,3 +56,15 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.robolectric:robolectric:4.14.1'
 }
+
+// Native filtering engine is built from pinned source; no prebuilt binaries are committed.
+def buildBlocker = tasks.register('buildBlocker', Exec) {
+    workingDir rootProject.projectDir
+    commandLine 'python3', 'scripts/build-blocker.py'
+    inputs.dir rootProject.file('native/blocker/src')
+    inputs.file rootProject.file('native/blocker/Cargo.toml')
+    inputs.file rootProject.file('native/blocker/Cargo.lock')
+    outputs.dir layout.buildDirectory.dir('generated/blockerJni')
+}
+android.sourceSets.main.jniLibs.srcDir(layout.buildDirectory.dir('generated/blockerJni'))
+tasks.named('preBuild').configure { dependsOn buildBlocker }

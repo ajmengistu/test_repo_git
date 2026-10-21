@@ -1,21 +1,29 @@
 package com.aj.firelauncher;
 
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
 import android.graphics.Color;
+import android.graphics.Rect;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Message;
 import android.os.SystemClock;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.KeyEvent;
-import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodManager;
 import android.webkit.CookieManager;
+import android.webkit.JavascriptInterface;
+import android.webkit.ServiceWorkerClient;
+import android.webkit.ServiceWorkerController;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -27,425 +35,496 @@ import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
-
+import org.json.JSONArray;
+import org.json.JSONObject;
 import java.io.ByteArrayInputStream;
 import java.net.URLEncoder;
-import java.util.Arrays;
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
-import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class BrowserActivity extends Activity {
     private static final String HOME = "https://search.brave.com/";
-    private static final Set<String> BLOCKED_HOSTS = new HashSet<>(Arrays.asList(
-            "doubleclick.net",
-            "googlesyndication.com",
-            "googleadservices.com",
-            "adservice.google.com",
-            "adsystem.com",
-            "amazon-adsystem.com",
-            "aan.amazon.com",
-            "assoc-amazon.com",
-            "fls-na.amazon.com",
-            "fls-eu.amazon.com",
-            "unagi.amazon.com",
-            "unagi-na.amazon.com",
-            "moatads.com",
-            "2mdn.net",
-            "rubiconproject.com",
-            "pubmatic.com",
-            "casalemedia.com",
-            "criteo.com",
-            "criteo.net",
-            "adsrvr.org",
-            "demdex.net",
-            "omtrdc.net",
-            "serving-sys.com",
-            "adnxs.com",
-            "taboola.com",
-            "outbrain.com",
-            "popads.net",
-            "popcash.net",
-            "propellerads.com",
-            "trafficjunky.net",
-            "scorecardresearch.com",
-            "quantserve.com",
-            "zedo.com",
-            "exoclick.com",
-            "magsrv.com",
-            "realsrv.com",
-            "adsterra.com",
-            "onclickads.net",
-            "hilltopads.net",
-            "juicyads.com",
-            "trafficstars.com",
-            "acscdn.com",
-            "usrpubtrk.com",
-            "adtng.com"
-    ));
-
+    private static final int[] ZOOMS = {75,85,90,100,110,125};
+    private static final int[] FONTS = {75,85,100,110,125,150};
     private WebView webView;
+    private BrowserCursor cursor;
+    private FrameLayout root;
+    private LinearLayout toolbar;
     private EditText address;
     private TextView shield;
+    private TextView zoomButton;
     private FrameLayout fullscreenContainer;
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
-    private boolean aggressive = true;
+    private BrowserStore store;
+    private ContentBlocker blocker;
+    private String mobileAgent;
+    private String desktopAgent;
+    private volatile String pageUrl = HOME;
+    private volatile boolean playerCompatibility = true;
+    private final ConcurrentHashMap<String,Boolean> allowedSites = new ConcurrentHashMap<>();
+    private final AtomicInteger blockedCount = new AtomicInteger();
+    private int appliedZoom = 100;
+    private boolean zoomPending;
+    private long lastClick = -10000;
+    private long lastCompatibility;
+    private final List<WebView> popupSinks = new ArrayList<>();
+    private AlertDialog dialog;
 
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
+    @Override protected void onCreate(Bundle state) {
+        super.onCreate(state);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
-
+        getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN,WindowManager.LayoutParams.FLAG_FULLSCREEN);
+        getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        hideSystemUi();
+        store = new BrowserStore(this);
+        blocker = ContentBlocker.get(this);
         buildUi();
         configureWebView();
-        Uri initialUri = getIntent() != null ? getIntent().getData() : null;
-        webView.loadUrl(isAllowedInitialUri(initialUri) ? initialUri.toString() : HOME);
+        Uri initial = getIntent() == null ? null : getIntent().getData();
+        String url = isAllowedInitialUri(initial) ? initial.toString() : HOME;
+        if (state == null || webView.restoreState(state) == null) load(url);
+        else { pageUrl = webView.getUrl() == null ? HOME : webView.getUrl(); applySite(pageUrl); }
         webView.requestFocus();
     }
 
     private boolean isAllowedInitialUri(Uri uri) {
-        if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null) {
-            return false;
-        }
-        String host = uri.getHost().toLowerCase(Locale.US);
+        if (uri == null || !"https".equals(uri.getScheme()) || uri.getHost() == null) return false;
+        String host = ContentBlocker.site(uri.toString());
         return host.equals("fmhy.net") || host.endsWith(".fmhy.net")
                 || host.equals("imdb.com") || host.endsWith(".imdb.com");
     }
 
-    private boolean isTrustedHost(String host) {
-        if (host == null) return false;
-        String h = host.toLowerCase(Locale.US);
-        return h.equals("fmhy.net") || h.endsWith(".fmhy.net")
-                || h.equals("search.brave.com")
-                || h.equals("imdb.com") || h.endsWith(".imdb.com")
-                || h.equals("amazon.com") || h.endsWith(".amazon.com");
-    }
-
     private void buildUi() {
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setBackgroundColor(Color.rgb(12, 17, 27));
-
-        LinearLayout bar = new LinearLayout(this);
-        bar.setOrientation(LinearLayout.HORIZONTAL);
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(18), dp(12), dp(18), dp(12));
-        root.addView(bar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(72)));
-
-        TextView back = button("‹");
-        back.setOnClickListener(v -> {
-            if (webView.canGoBack()) webView.goBack();
-        });
-        bar.addView(back, new LinearLayout.LayoutParams(dp(58), dp(48)));
-
-        TextView forward = button("›");
-        forward.setOnClickListener(v -> {
-            if (webView.canGoForward()) webView.goForward();
-        });
-        LinearLayout.LayoutParams small = new LinearLayout.LayoutParams(dp(58), dp(48));
-        small.leftMargin = dp(8);
-        bar.addView(forward, small);
-
-        TextView home = button("⌂");
-        home.setOnClickListener(v -> webView.loadUrl(HOME));
-        LinearLayout.LayoutParams homeLp = new LinearLayout.LayoutParams(dp(58), dp(48));
-        homeLp.leftMargin = dp(8);
-        bar.addView(home, homeLp);
-
-        address = new EditText(this);
-        address.setSingleLine(true);
-        address.setTextColor(Color.WHITE);
-        address.setHintTextColor(Color.rgb(145, 157, 177));
-        address.setHint("Search or enter address");
-        address.setTextSize(16);
-        address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
-        address.setBackgroundResource(R.drawable.browser_address);
-        address.setPadding(dp(18), 0, dp(18), 0);
-        address.setOnEditorActionListener((v, actionId, event) -> {
-            navigate(address.getText().toString());
-            return true;
-        });
-        LinearLayout.LayoutParams addressLp = new LinearLayout.LayoutParams(0, dp(48), 1f);
-        addressLp.leftMargin = dp(12);
-        bar.addView(address, addressLp);
-
-        shield = button("Shields: ON");
-        shield.setTextSize(13);
-        shield.setOnClickListener(v -> {
-            aggressive = !aggressive;
-            shield.setText(aggressive ? "Shields: ON" : "Shields: OFF");
-            Toast.makeText(this,
-                    aggressive ? "Aggressive popup/ad blocking enabled" : "Aggressive blocking disabled",
-                    Toast.LENGTH_SHORT).show();
-            webView.reload();
-        });
-        LinearLayout.LayoutParams shieldLp = new LinearLayout.LayoutParams(dp(136), dp(48));
-        shieldLp.leftMargin = dp(10);
-        bar.addView(shield, shieldLp);
-
-        TextView clean = button("Clear Ads");
-        clean.setTextSize(13);
-        clean.setOnClickListener(v -> {
-            stripOverlays(webView);
-            Toast.makeText(this, "Cleared overlays", Toast.LENGTH_SHORT).show();
-            webView.requestFocus();
-        });
-        LinearLayout.LayoutParams cleanLp = new LinearLayout.LayoutParams(dp(116), dp(48));
-        cleanLp.leftMargin = dp(8);
-        bar.addView(clean, cleanLp);
-
+        root = new FrameLayout(this);
+        root.setBackgroundColor(Color.rgb(7,7,8));
+        root.setPadding(dp(24),dp(16),dp(24),dp(16));
+        root.setTag("browser-root");
         webView = new WebView(this);
         webView.setId(View.generateViewId());
-        webView.setFocusable(true);
-        webView.setFocusableInTouchMode(true);
-        for (int i = 0; i < bar.getChildCount(); i++) {
-            bar.getChildAt(i).setNextFocusDownId(webView.getId());
-        }
-        root.addView(webView, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
-
-        FrameLayout wrapper = new FrameLayout(this);
-        wrapper.addView(root, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        webView.setTag("web");
+        webView.setBackgroundColor(Color.rgb(7,7,8));
+        root.addView(webView,new FrameLayout.LayoutParams(-1,-1));
         fullscreenContainer = new FrameLayout(this);
         fullscreenContainer.setBackgroundColor(Color.BLACK);
         fullscreenContainer.setVisibility(View.GONE);
-        wrapper.addView(fullscreenContainer, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(fullscreenContainer,new FrameLayout.LayoutParams(-1,-1));
+        cursor = new BrowserCursor(this);
+        cursor.setTag("cursor");
+        cursor.setTarget(webView);
+        root.addView(cursor,new FrameLayout.LayoutParams(-1,-1));
 
-        setContentView(wrapper);
-    }
-
-    private TextView button(String label) {
-        TextView v = new TextView(this);
-        v.setText(label);
-        v.setTextColor(Color.WHITE);
-        v.setTextSize(24);
-        v.setGravity(Gravity.CENTER);
-        v.setFocusable(true);
-        v.setBackgroundResource(R.drawable.browser_button);
-        v.setOnFocusChangeListener((view, focused) -> {
-            view.setBackgroundResource(focused ? R.drawable.browser_button_focused : R.drawable.browser_button);
-            view.animate().scaleX(focused ? 1.06f : 1f).scaleY(focused ? 1.06f : 1f).setDuration(90).start();
+        toolbar = new LinearLayout(this);
+        toolbar.setTag("browser-toolbar");
+        toolbar.setOrientation(LinearLayout.VERTICAL);
+        toolbar.setPadding(dp(12),dp(10),dp(12),dp(10));
+        toolbar.setBackgroundResource(R.drawable.browser_panel);
+        toolbar.setElevation(dp(4));
+        FrameLayout.LayoutParams panelLp = new FrameLayout.LayoutParams(-1,dp(112),Gravity.TOP);
+        root.addView(toolbar,panelLp);
+        LinearLayout top = new LinearLayout(this);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        toolbar.addView(top,new LinearLayout.LayoutParams(-1,dp(40)));
+        TextView brand = label("AJ / WEB",14);
+        top.addView(brand,new LinearLayout.LayoutParams(dp(80),-1));
+        address = new EditText(this);
+        address.setTag("address");
+        address.setId(View.generateViewId());
+        address.setSingleLine(true);
+        address.setTextColor(Color.rgb(250,250,250));
+        address.setHintTextColor(Color.rgb(153,153,165));
+        address.setTextSize(16);
+        address.setHint("Search or enter address");
+        address.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
+        address.setBackgroundResource(R.drawable.browser_address);
+        address.setPadding(dp(12),0,dp(12),0);
+        address.setSelectAllOnFocus(true);
+        address.setOnEditorActionListener((v,id,event) -> {
+            if (event != null && event.getAction() != KeyEvent.ACTION_UP) return true;
+            navigate(address.getText().toString()); return true;
         });
-        return v;
-    }
-
-    private void configureWebView() {
-        WebSettings s = webView.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setDomStorageEnabled(true);
-        s.setDatabaseEnabled(true);
-        s.setSaveFormData(true);
-        s.setMediaPlaybackRequiresUserGesture(false);
-        s.setSupportMultipleWindows(true);
-        s.setJavaScriptCanOpenWindowsAutomatically(false);
-        s.setBuiltInZoomControls(true);
-        s.setDisplayZoomControls(false);
-        s.setUseWideViewPort(true);
-        s.setLoadWithOverviewMode(true);
-        enablePersistentCookies();
-        String ua = s.getUserAgentString();
-        if (ua != null) {
-            ua = ua.replace("; wv)", ")").replace("Version/4.0 ", "");
-            if (!ua.contains("Mobile Safari")) {
-                ua = ua.replace("Safari/", "Mobile Safari/");
-            }
-            if (!ua.contains("OPR/")) {
-                ua = ua + " OPR/114.0.0.0";
-            }
-            s.setUserAgentString(ua);
-        }
-
-        webView.setWebChromeClient(new WebChromeClient() {
-            @Override
-            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture,
-                                          Message resultMsg) {
-                if (resultMsg == null) {
-                    return false;
-                }
-                String currentUrl = view != null ? view.getUrl() : null;
-                String currentHost = currentUrl != null ? Uri.parse(currentUrl).getHost() : null;
-                boolean isDirectory = isTrustedHost(currentHost);
-                if ((!aggressive || isDirectory) && isUserGesture && view != null) {
-                    WebView.HitTestResult hit = view.getHitTestResult();
-                    if (hit != null && hit.getExtra() != null) {
-                        view.loadUrl(hit.getExtra());
-                        return false;
-                    }
-                }
-                // Create an invisible sink WebView so window.open() returns a real native
-                // Window object to stream players (preventing "Remove sandbox attributes"
-                // overlays) while discarding the popup ad in the background.
-                WebView sink = new WebView(BrowserActivity.this);
-                sink.setWebViewClient(new WebViewClient() {
-                    @Override
-                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest req) {
-                        if (isDirectory && isUserGesture && req.getUrl() != null) {
-                            webView.loadUrl(req.getUrl().toString());
-                        }
-                        return true;
-                    }
-                });
-                WebView.WebViewTransport transport = (WebView.WebViewTransport) resultMsg.obj;
-                transport.setWebView(sink);
-                resultMsg.sendToTarget();
-                webView.postDelayed(sink::destroy, 600);
-                return true;
-            }
-
-            @Override
-            public void onShowCustomView(View view, CustomViewCallback callback) {
-                if (customView != null) {
-                    callback.onCustomViewHidden();
-                    return;
-                }
-                customView = view;
-                customViewCallback = callback;
-                fullscreenContainer.addView(view, new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                fullscreenContainer.setVisibility(View.VISIBLE);
-            }
-
-            @Override
-            public void onHideCustomView() {
-                if (customView == null) return;
-                fullscreenContainer.removeView(customView);
-                fullscreenContainer.setVisibility(View.GONE);
-                if (customViewCallback != null) customViewCallback.onCustomViewHidden();
-                customView = null;
-                customViewCallback = null;
-            }
-        });
-
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                Uri uri = request.getUrl();
-                if (aggressive && isBlocked(uri.getHost())) {
-                    toastBlocked();
-                    return true;
-                }
-                return false;
-            }
-
-            @Override
-            public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
-                Uri reqUri = request.getUrl();
-                String path = reqUri.getPath();
-                boolean adPath = path != null && ("/ad.html".equals(path)
-                        || path.startsWith("/ads/") || path.startsWith("/aan/"));
-                if (aggressive && (isBlocked(reqUri.getHost()) || adPath)) {
-                    return new WebResourceResponse(
-                            "text/plain",
-                            "UTF-8",
-                            new ByteArrayInputStream(new byte[0]));
-                }
-                return super.shouldInterceptRequest(view, request);
-            }
-
-            @Override
-            public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
-                address.setText(url);
-                unsandboxIframes(view);
-            }
-
-            @Override
-            public void onLoadResource(WebView view, String url) {
-                unsandboxIframes(view);
-            }
-
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                address.setText(url);
-                flushCookies();
-                unsandboxIframes(view);
-                if (aggressive) {
-                    stripOverlays(view);
-                }
-                injectDpadNavigation(view);
-            }
-        });
-
-        webView.setOnKeyListener((v, keyCode, event) -> {
-            if (keyCode == KeyEvent.KEYCODE_MENU) {
-                if (event.getAction() == KeyEvent.ACTION_UP) {
-                    address.requestFocus();
-                    address.selectAll();
-                }
-                return true;
-            }
-            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_UP
-                    || keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    int delta = (keyCode == KeyEvent.KEYCODE_DPAD_DOWN || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) ? 1 : -1;
-                    webView.evaluateJavascript("window.__ajStep ? window.__ajStep(" + delta + ") : 'NONE'", result -> {
-                        if ("\"TOP\"".equals(result) && keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                            address.requestFocus();
-                        }
-                    });
-                }
-                return true;
-            }
-            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-                if (event.getAction() == KeyEvent.ACTION_UP) {
-                    webView.evaluateJavascript("window.__ajClick ? window.__ajClick() : ''", result -> {
-                        if (result != null && (result.startsWith("\"TAP:") || result.startsWith("\"INPUT:"))) {
-                            boolean isInput = result.startsWith("\"INPUT:");
-                            String coords = result.replace("\"", "").substring(isInput ? 6 : 4);
-                            String[] parts = coords.split(",");
-                            if (parts.length == 2) {
-                                try {
-                                    float density = getResources().getDisplayMetrics().density;
-                                    float x = Float.parseFloat(parts[0]) * density;
-                                    float y = Float.parseFloat(parts[1]) * density;
-                                    tapWebView(x, y);
-                                    if (isInput) {
-                                        InputMethodManager imm = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-                                        if (imm != null) {
-                                            imm.showSoftInput(webView, InputMethodManager.SHOW_IMPLICIT);
-                                        }
-                                    }
-                                } catch (Exception ignored) {
-                                }
-                            }
-                        }
-                    });
-                }
+        top.addView(address,new LinearLayout.LayoutParams(0,-1,1f));
+        TextView go = addButton(top,"Go", "go", () -> navigate(address.getText().toString()),dp(48));
+        TextView close = addButton(top,"×", "close-toolbar", () -> showToolbar(false),dp(40));
+        go.setNextFocusLeftId(address.getId()); go.setNextFocusRightId(close.getId());
+        close.setNextFocusLeftId(go.getId()); close.setNextFocusRightId(close.getId());
+        address.setOnKeyListener((v,key,event) -> {
+            if(!keyboardVisible() && (key==KeyEvent.KEYCODE_DPAD_RIGHT || key==KeyEvent.KEYCODE_DPAD_LEFT)) {
+                if(event.getAction()==KeyEvent.ACTION_DOWN) { if(key==KeyEvent.KEYCODE_DPAD_RIGHT)go.requestFocus();else close.requestFocus(); }
                 return true;
             }
             return false;
         });
+        LinearLayout actions = new LinearLayout(this);
+        LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1,dp(40));
+        actionsLp.topMargin = dp(10);
+        toolbar.addView(actions,actionsLp);
+        addButton(actions,"Back","browser-back",this::onBackPressed,0);
+        addButton(actions,"Forward","forward",() -> { showToolbar(false); if(webView.canGoForward()) webView.goForward(); },0);
+        addButton(actions,"Home","home",() -> load(HOME),0);
+        addButton(actions,"Refresh","refresh",() -> { showToolbar(false); webView.reload(); },0);
+        addButton(actions,"Bookmarks","bookmarks",this::showBookmarks,0);
+        zoomButton = addButton(actions,"Zoom 90%","zoom",this::showZoom,0);
+        addButton(actions,"Settings","browser-settings",this::showSettings,0);
+        shield = addButton(actions,"Block: On","blocking",this::toggleSiteBlocking,0);
+        // Explicit neighbors keep focus inside the overlay; the webpage receives keys only after closing it.
+        for (int i=0;i<actions.getChildCount();i++) {
+            View item = actions.getChildAt(i);
+            item.setNextFocusLeftId(actions.getChildAt(Math.max(0,i-1)).getId());
+            item.setNextFocusRightId(actions.getChildAt(Math.min(actions.getChildCount()-1,i+1)).getId());
+            item.setNextFocusDownId(item.getId());
+            item.setNextFocusUpId(address.getId());
+        }
+        address.setNextFocusDownId(actions.getChildAt(0).getId());
+        toolbar.setVisibility(View.GONE);
+        setContentView(root);
     }
 
-    private void enablePersistentCookies() {
-        try {
-            CookieManager cm = CookieManager.getInstance();
-            cm.setAcceptCookie(true);
-            cm.setAcceptThirdPartyCookies(webView, true);
-        } catch (Throwable ignored) {
+    private TextView label(String text,int size) {
+        TextView v = new TextView(this);
+        v.setText(text); v.setTextColor(Color.rgb(250,250,250)); v.setTextSize(size);
+        v.setGravity(Gravity.CENTER); v.setSingleLine(true);
+        v.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        return v;
+    }
+    private TextView addButton(LinearLayout row,String title,String tag,Runnable action,int width) {
+        TextView v = label(title,14);
+        v.setId(View.generateViewId()); v.setTag(tag);
+        v.setFocusable(true); v.setFocusableInTouchMode(true);
+        v.setBackgroundResource(R.drawable.browser_button);
+        v.setOnFocusChangeListener((view,focused) -> view.setBackgroundResource(
+                focused ? R.drawable.browser_button_focused : R.drawable.browser_button));
+        v.setOnClickListener(view -> action.run());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(width, -1,width == 0 ? 1f : 0f);
+        lp.leftMargin = dp(6); row.addView(v,lp);
+        return v;
+    }
+
+    private void showToolbar(boolean visible) {
+        cursor.stop();
+        toolbar.setVisibility(visible ? View.VISIBLE : View.GONE);
+        cursor.setVisibility(visible ? View.GONE : View.VISIBLE);
+        if (visible) {
+            updateStatus(); address.setText(pageUrl); address.requestFocus(); address.selectAll();
+        } else {
+            hideKeyboard(); webView.requestFocus();
+        }
+    }
+    private void updateStatus() {
+        String site = ContentBlocker.site(pageUrl);
+        shield.setText(allowedSites.containsKey(site) ? "Block: Off" : "Block: " + blocker.status() + " · " + blockedCount.get());
+        zoomButton.setText("Zoom " + store.zoom(site) + "%");
+    }
+    private void toggleSiteBlocking() {
+        String site = ContentBlocker.site(pageUrl);
+        if (allowedSites.containsKey(site)) allowedSites.remove(site); else allowedSites.put(site,true);
+        updateStatus();
+        Toast.makeText(this,allowedSites.containsKey(site) ? "Blocking paused for this site in this browser session" : "Blocking enabled",Toast.LENGTH_SHORT).show();
+        showToolbar(false); webView.reload();
+    }
+
+    private void configureWebView() {
+        WebSettings s = webView.getSettings();
+        s.setJavaScriptEnabled(true); s.setDomStorageEnabled(true); s.setDatabaseEnabled(true);
+        s.setSaveFormData(true); s.setMediaPlaybackRequiresUserGesture(false);
+        s.setSupportMultipleWindows(true); s.setJavaScriptCanOpenWindowsAutomatically(false);
+        s.setBuiltInZoomControls(true); s.setDisplayZoomControls(false);
+        s.setUseWideViewPort(true); s.setLoadWithOverviewMode(true);
+        s.setAllowFileAccess(false); s.setAllowContentAccess(false);
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(webView,true);
+        mobileAgent = s.getUserAgentString();
+        Matcher version = Pattern.compile("Chrome/([0-9.]+)").matcher(mobileAgent == null ? "" : mobileAgent);
+        desktopAgent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/"
+                + (version.find() ? version.group(1) : "84.0.4147.125") + " Safari/537.36";
+        WebView.setWebContentsDebuggingEnabled((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0);
+        webView.addJavascriptInterface(new CosmeticBridge(),"AJFilters");
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override public boolean onCreateWindow(WebView view,boolean isDialog,boolean gesture,Message result) {
+                if (result == null || !(result.obj instanceof WebView.WebViewTransport)) return false;
+                // Preserve the real Window sink needed by some existing players; only user-initiated,
+                // non-blocked HTTP(S) destinations may replace the current page.
+                WebView sink = new WebView(BrowserActivity.this);
+                popupSinks.add(sink);
+                sink.setWebViewClient(new WebViewClient() {
+                    private boolean relay(String url) {
+                        if (gesture && http(url) && !blocked(url,"document","GET",false)) load(url);
+                        sink.post(() -> { popupSinks.remove(sink); sink.destroy(); });
+                        return true;
+                    }
+                    @Override public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r) { return relay(r.getUrl().toString()); }
+                    @Override public boolean shouldOverrideUrlLoading(WebView v,String url) { return relay(url); }
+                });
+                ((WebView.WebViewTransport)result.obj).setWebView(sink); result.sendToTarget();
+                webView.postDelayed(() -> { if(popupSinks.remove(sink)) sink.destroy(); },1200);
+                return true;
+            }
+            @Override public void onShowCustomView(View view,CustomViewCallback callback) {
+                if(customView != null) { callback.onCustomViewHidden(); return; }
+                showToolbar(false); customView = view; customViewCallback = callback;
+                fullscreenContainer.addView(view,new FrameLayout.LayoutParams(-1,-1));
+                fullscreenContainer.setVisibility(View.VISIBLE); webView.setVisibility(View.INVISIBLE);
+                cursor.setTarget(fullscreenContainer); hideSystemUi();
+            }
+            @Override public void onHideCustomView() { hideVideo(); }
+        });
+        webView.setWebViewClient(new WebViewClient() {
+            @Override public boolean shouldOverrideUrlLoading(WebView view,WebResourceRequest request) {
+                String url = request.getUrl().toString();
+                if(!http(url)) return external(url,request.hasGesture());
+                if(blocked(url,"document",request.getMethod(),false)) return true;
+                if(request.isForMainFrame()) applySite(url);
+                return false;
+            }
+            @Override public boolean shouldOverrideUrlLoading(WebView view,String url) {
+                if(!http(url)) return external(url,false);
+                return blocked(url,"document","GET",false);
+            }
+            @Override public WebResourceResponse shouldInterceptRequest(WebView view,WebResourceRequest request) { return intercept(request); }
+            @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon) {
+                pageUrl = url; blockedCount.set(0); appliedZoom = 100; zoomPending = true;
+                if(!address.hasFocus()) address.setText(url);
+                applySite(url);
+            }
+            @Override public void onLoadResource(WebView view,String url) {
+                // Retain the existing stream-player compatibility workaround, with bounded work.
+                long now = SystemClock.uptimeMillis();
+                if(playerCompatibility && now - lastCompatibility > 1500) {
+                    lastCompatibility = now; unsandboxIframes(view);
+                }
+            }
+            @Override public void onPageFinished(WebView view,String url) {
+                pageUrl = url;
+                if(!address.hasFocus()) address.setText(url);
+                flushCookies(); store.remember("history",url,view.getTitle());
+                if(playerCompatibility) unsandboxIframes(view);
+                injectCosmetics();
+                if(zoomPending) {
+                    zoomPending = false;
+                    webView.postDelayed(() -> {
+                        if(url.equals(pageUrl)) applyZoom(store.zoom(ContentBlocker.site(url)));
+                    },120);
+                }
+                if(toolbar.getVisibility() == View.VISIBLE) updateStatus();
+            }
+        });
+        if(Build.VERSION.SDK_INT >= 24) {
+            ServiceWorkerController.getInstance().setServiceWorkerClient(new ServiceWorkerClient() {
+                @Override public WebResourceResponse shouldInterceptRequest(WebResourceRequest request) { return intercept(request); }
+            });
         }
     }
 
-    private void flushCookies() {
-        try {
-            CookieManager.getInstance().flush();
-        } catch (Throwable ignored) {
+    private boolean blocked(String url,String type,String method,boolean await) {
+        String source = pageUrl;
+        if(allowedSites.containsKey(ContentBlocker.site(source))) return false;
+        if(blocker.blocks(url,source,type,method,await)) { blockedCount.incrementAndGet(); return true; }
+        return false;
+    }
+    private WebResourceResponse intercept(WebResourceRequest request) {
+        if(!blocked(request.getUrl().toString(),ContentBlocker.requestType(request),request.getMethod(),true)) return null;
+        return new WebResourceResponse("text/plain","UTF-8",200,"OK",java.util.Collections.emptyMap(),new ByteArrayInputStream(new byte[0]));
+    }
+
+    public final class CosmeticBridge {
+        @JavascriptInterface public String selectors(String url,String tokens) {
+            // Read-only API: no activity, file, navigation or settings access from web content.
+            if(url == null || tokens == null || tokens.length() > 32768 || !http(url)
+                    || !ContentBlocker.site(url).equals(ContentBlocker.site(pageUrl))
+                    || allowedSites.containsKey(ContentBlocker.site(pageUrl))) return "[]";
+            return blocker.selectors(url,tokens);
         }
     }
 
-    private void tapWebView(float x, float y) {
-        long now = SystemClock.uptimeMillis();
-        MotionEvent down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0);
-        MotionEvent up = MotionEvent.obtain(now, now + 40, MotionEvent.ACTION_UP, x, y, 0);
-        webView.dispatchTouchEvent(down);
-        webView.dispatchTouchEvent(up);
-        down.recycle();
-        up.recycle();
+    private void injectCosmetics() {
+        if(allowedSites.containsKey(ContentBlocker.site(pageUrl))) return;
+        webView.evaluateJavascript("(function(){try{" +
+            "if(window.__ajCosmetics){window.__ajCosmetics();return;}" +
+            "var classes=new Set(),ids=new Set(),rules=new Set(),timer,queue=[document];" +
+            "var st=document.createElement('style');st.id='__aj_ad_style';(document.head||document.documentElement).appendChild(st);" +
+            "function scan(){timer=0;var cs=[],is=[],count=0,roots=queue.splice(0,128);" +
+            "roots.forEach(function(root){var nodes=[root];if(root.querySelectorAll)nodes=nodes.concat(Array.from(root.querySelectorAll('[class],[id]')).slice(0,1500));" +
+            "nodes.forEach(function(el){if(++count>2000||!el.classList)return;Array.from(el.classList).forEach(function(c){if(!classes.has(c)&&cs.length<512){classes.add(c);cs.push(c);}});" +
+            "if(el.id&&!ids.has(el.id)&&is.length<512){ids.add(el.id);is.push(el.id);}});});" +
+            "JSON.parse(AJFilters.selectors(location.href,JSON.stringify({classes:cs,ids:is}))).forEach(function(s){if(!rules.has(s)){try{st.sheet.insertRule(s+'{display:none!important}',st.sheet.cssRules.length);rules.add(s);}catch(e){}}});}" +
+            "function schedule(){if(!timer)timer=setTimeout(scan,500);}" +
+            "window.__ajCosmetics=function(){queue.push(document);schedule();};" +
+            "new MutationObserver(function(ms){ms.forEach(function(m){if(queue.length>=128)return;if(m.type==='attributes')queue.push(m.target);else Array.from(m.addedNodes).forEach(function(n){if(n.nodeType===1&&n!==st&&queue.length<128)queue.push(n);});});schedule();})" +
+            ".observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['class','id']});scan();" +
+            "}catch(e){}})();",null);
     }
+
+    private void applySite(String url) {
+        String site = ContentBlocker.site(url);
+        WebSettings s = webView.getSettings();
+        String agent = store.desktop(site) ? desktopAgent : mobileAgent;
+        if(agent != null && !agent.equals(s.getUserAgentString())) s.setUserAgentString(agent);
+        s.setTextZoom(store.font(site));
+        playerCompatibility = store.playerCompatibility(site);
+    }
+    private void applyZoom(int percent) {
+        // Relative to WebView's own fitted overview; honor the page's minimum/maximum scale.
+        webView.zoomBy(percent / (float)appliedZoom); appliedZoom = percent;
+        updateStatus();
+    }
+    private void load(String url) {
+        showToolbar(false); applySite(url); webView.setInitialScale(0); webView.loadUrl(url);
+    }
+    private void navigate(String raw) {
+        String value = raw == null ? "" : raw.trim();
+        if(value.isEmpty()) return;
+        if(value.contains("://") && !http(value)) { toast("Use an HTTP or HTTPS address"); return; }
+        if(value.contains(" ") || (!value.contains(".") && !value.startsWith("http"))) {
+            try { value = HOME + "search?q=" + URLEncoder.encode(value,"UTF-8"); }
+            catch(Exception ignored) { value = HOME; }
+        } else if(!http(value)) value = "https://" + value;
+        if(Uri.parse(value).getHost() == null) { toast("Check the address"); return; }
+        load(value);
+    }
+    private static boolean http(String url) {
+        if(url == null) return false;
+        Uri uri = Uri.parse(url);
+        return ("https".equalsIgnoreCase(uri.getScheme()) || "http".equalsIgnoreCase(uri.getScheme())) && uri.getHost() != null;
+    }
+    private boolean external(String url,boolean gesture) {
+        if(!gesture && SystemClock.uptimeMillis() - lastClick > 1500) return true;
+        try {
+            Intent parsed = url.startsWith("intent:") ? Intent.parseUri(url,Intent.URI_INTENT_SCHEME) : new Intent(Intent.ACTION_VIEW,Uri.parse(url));
+            Uri data = parsed.getData();
+            if(data == null || "file".equals(data.getScheme()) || "content".equals(data.getScheme()) || "javascript".equals(data.getScheme())) return true;
+            Intent safe = new Intent(Intent.ACTION_VIEW,data).addCategory(Intent.CATEGORY_BROWSABLE);
+            if(parsed.getPackage() != null) safe.setPackage(parsed.getPackage());
+            try { startActivity(safe); }
+            catch(ActivityNotFoundException | SecurityException e) {
+                String fallback = parsed.getStringExtra("browser_fallback_url");
+                if(http(fallback)) load(fallback); else toast("No installed app can open this link");
+            }
+        } catch(Exception e) { toast("Unable to open this app link"); }
+        return true;
+    }
+
+    @Override public boolean dispatchKeyEvent(KeyEvent event) {
+        if(event.getKeyCode() == KeyEvent.KEYCODE_MENU) {
+            if(event.getAction() == KeyEvent.ACTION_UP) showToolbar(toolbar.getVisibility() != View.VISIBLE);
+            return true;
+        }
+        if(toolbar.getVisibility() == View.VISIBLE || keyboardVisible()) return super.dispatchKeyEvent(event);
+        if(cursor.direction(event)) return true;
+        if(event.getKeyCode() == KeyEvent.KEYCODE_DPAD_CENTER || event.getKeyCode() == KeyEvent.KEYCODE_ENTER) {
+            if(event.getAction() == KeyEvent.ACTION_UP) {
+                lastClick = SystemClock.uptimeMillis(); cursor.click();
+                if(customView == null) webView.evaluateJavascript(
+                    "(function(){var e=document.activeElement;return !!(e&&(e.isContentEditable||e.tagName==='TEXTAREA'||(e.tagName==='INPUT'&&!/^(button|submit|checkbox|radio|range|file|color)$/i.test(e.type))));})()",
+                    value -> { if("true".equals(value)) {
+                        InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+                        if(ime!=null)ime.showSoftInput(webView,InputMethodManager.SHOW_IMPLICIT);
+                    }});
+            }
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    private boolean keyboardVisible() {
+        Rect r=new Rect(); root.getWindowVisibleDisplayFrame(r);
+        return root.getRootView().getHeight()-r.bottom > dp(120);
+    }
+    private void hideKeyboard() {
+        InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
+        if(ime!=null)ime.hideSoftInputFromWindow(webView.getWindowToken(),0);
+    }
+    private void hideVideo() {
+        if(customView==null)return;
+        fullscreenContainer.removeAllViews(); fullscreenContainer.setVisibility(View.GONE);
+        webView.setVisibility(View.VISIBLE); customView=null;
+        WebChromeClient.CustomViewCallback callback=customViewCallback; customViewCallback=null;
+        cursor.setTarget(webView); if(callback!=null)callback.onCustomViewHidden(); hideSystemUi();
+    }
+
+    private void showZoom() {
+        String site=ContentBlocker.site(pageUrl);
+        String[] labels=new String[ZOOMS.length]; int selected=2;
+        for(int i=0;i<ZOOMS.length;i++){labels[i]=ZOOMS[i]+"% of fitted page";if(store.zoom(site)==ZOOMS[i])selected=i;}
+        dialog=new AlertDialog.Builder(this).setTitle("Page zoom · this site")
+                .setSingleChoiceItems(labels,selected,(d,which)->{store.setZoom(site,ZOOMS[which]);applyZoom(ZOOMS[which]);d.dismiss();showToolbar(false);})
+                .setNegativeButton("Close",null).show();
+    }
+    private void showFonts() {
+        String site=ContentBlocker.site(pageUrl);String[] labels=new String[FONTS.length];int selected=2;
+        for(int i=0;i<FONTS.length;i++){labels[i]=FONTS[i]+"%";if(store.font(site)==FONTS[i])selected=i;}
+        dialog=new AlertDialog.Builder(this).setTitle("Text size · this site")
+                .setSingleChoiceItems(labels,selected,(d,which)->{store.setFont(site,FONTS[which]);webView.getSettings().setTextZoom(FONTS[which]);d.dismiss();showToolbar(false);})
+                .setNegativeButton("Close",null).show();
+    }
+    private void showSettings() {
+        String site=ContentBlocker.site(pageUrl);
+        String[] labels={(store.desktop(site)?"Desktop site ✓":"Mobile site ✓"),"Text size: "+store.font(site)+"%",
+                cursor.isScrollMode()?"Use mouse cursor":"Use scroll mode","History","Clear Ads",
+                "Player compatibility: "+(store.playerCompatibility(site)?"On":"Off"),"Blocking & open-source notices"};
+        dialog=new AlertDialog.Builder(this).setTitle("Browser settings · "+site).setItems(labels,(d,which)->{
+            switch(which){
+                case 0:store.setDesktop(site,!store.desktop(site));applySite(pageUrl);showToolbar(false);webView.reload();break;
+                case 1:showFonts();break;
+                case 2:cursor.setScrollMode(!cursor.isScrollMode());showToolbar(false);toast(cursor.isScrollMode()?"Scroll mode · arrows scroll; Menu → Settings to restore mouse":"Mouse cursor mode");break;
+                case 3:showHistory();break;
+                case 4:injectCosmetics();showToolbar(false);break;
+                case 5:store.setPlayerCompatibility(site,!store.playerCompatibility(site));playerCompatibility=store.playerCompatibility(site);showToolbar(false);webView.reload();break;
+                case 6:showNotices();break;
+            }
+        }).setNegativeButton("Close",null).show();
+    }
+    private void showBookmarks() {
+        JSONArray entries=store.entries("bookmarks");
+        boolean saved=false;for(int i=0;i<entries.length();i++)if(pageUrl.equals(entries.optJSONObject(i).optString("url")))saved=true;
+        final boolean remove=saved;
+        String[] labels=new String[entries.length()+1];labels[0]=saved?"Remove current bookmark":"Bookmark current page";
+        for(int i=0;i<entries.length();i++)labels[i+1]=entries.optJSONObject(i).optString("title");
+        dialog=new AlertDialog.Builder(this).setTitle("Bookmarks").setItems(labels,(d,which)->{
+            if(which==0){if(remove)store.removeBookmark(pageUrl);else store.remember("bookmarks",pageUrl,webView.getTitle());toast(remove?"Bookmark removed":"Bookmark saved");}
+            else load(entries.optJSONObject(which-1).optString("url"));
+        }).setNegativeButton("Close",null).show();
+    }
+    private void showHistory() {
+        JSONArray entries=store.entries("history");String[] labels=new String[entries.length()];
+        for(int i=0;i<entries.length();i++)labels[i]=entries.optJSONObject(i).optString("title");
+        dialog=new AlertDialog.Builder(this).setTitle(labels.length==0?"No browsing history yet":"History")
+                .setItems(labels,(d,which)->load(entries.optJSONObject(which).optString("url"))).setNegativeButton("Close",null).show();
+    }
+    private void showNotices() {
+        dialog=new AlertDialog.Builder(this).setTitle("Content blocking")
+            .setMessage("Brave adblock-rust engine (MPL-2.0), EasyList and EasyPrivacy (CC BY-SA 3.0), AdGuard Base (GPL-3.0). Bundled list snapshots; no Acceptable Ads subscription or background downloads. Some WebView traffic, advanced filter actions and first-party ads cannot be fully filtered.
+
+Cursor implementation informed by mrowser (MIT).
+
+The retained Player compatibility option relaxes iframe sandbox attributes for existing streaming players. Turn it off for untrusted sites. Full licenses and source links are included in the APK assets and repository THIRD_PARTY_NOTICES.md.")
+            .setPositiveButton("Close",null).show();
+    }
+
+    private void toast(String text) {Toast.makeText(this,text,Toast.LENGTH_SHORT).show();}
+    private void flushCookies(){CookieManager.getInstance().flush();}
+    private void hideSystemUi(){getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY|View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION);}
+    @Override public void onBackPressed(){
+        if(customView!=null)hideVideo();
+        else if(toolbar.getVisibility()==View.VISIBLE)showToolbar(false);
+        else if(webView.canGoBack())webView.goBack();
+        else finish();
+    }
+    @Override protected void onSaveInstanceState(Bundle state){webView.saveState(state);super.onSaveInstanceState(state);}
+    @Override protected void onResume(){super.onResume();if(webView!=null)webView.onResume();hideSystemUi();}
+    @Override protected void onPause(){cursor.stop();flushCookies();webView.onPause();super.onPause();}
+    @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(!focused&&cursor!=null)cursor.stop();}
+    @Override protected void onDestroy(){
+        cursor.stop();if(dialog!=null)dialog.dismiss();flushCookies();
+        if(Build.VERSION.SDK_INT>=24)ServiceWorkerController.getInstance().setServiceWorkerClient(null);
+        for(WebView sink:popupSinks)sink.destroy();popupSinks.clear();
+        webView.removeJavascriptInterface("AJFilters");webView.stopLoading();root.removeView(webView);webView.destroy();super.onDestroy();
+    }
+    private int dp(int value){return Math.round(value*getResources().getDisplayMetrics().density);}
 
     private void unsandboxIframes(WebView view) {
         view.evaluateJavascript(
@@ -471,153 +550,4 @@ public class BrowserActivity extends Activity {
                 "})();", null);
     }
 
-    private void stripOverlays(WebView view) {
-        unsandboxIframes(view);
-        view.evaluateJavascript(
-                "(function(){" +
-                "var AD_SEL='#top_ad,#top_ad_wrapper,#bottom_ad_wrapper,[id^=\"inline\"][id$=\"_slot\"],[id^=\"inline10\"],[id^=\"inline20\"],[id^=\"inline30\"],[id^=\"inline40\"],[id^=\"inline50\"],[id*=\"nas-slot\"],[id*=\"nasa_slot\"],[class*=\"nas-slot\"],[class*=\"SlotWrapper\"],[data-testid*=\"nas-slot\"],[data-testid*=\"ad-slot\"],[data-testid*=\"sponsored\"],[data-testid*=\"promoted\"],div[class*=\"sponsored\"],section[class*=\"sponsored\"],aside div[class*=\"ad-\"],iframe[src*=\"amazon-adsystem\"],iframe[src*=\"aan.amazon\"],iframe[id*=\"ad_\"],iframe[title*=\"Advertisement\"],[aria-label=\"Sponsored\"],[aria-label=\"Advertisement\"]';" +
-                "if(!document.getElementById('__aj_ad_style')){" +
-                "var st=document.createElement('style');st.id='__aj_ad_style';" +
-                "st.textContent=AD_SEL+'{display:none !important;}';" +
-                "if(document.head)document.head.appendChild(st);}" +
-                "function clean(){" +
-                "try{" +
-                "document.querySelectorAll(AD_SEL).forEach(function(el){el.remove();});" +
-                "document.querySelectorAll('span,div,p,small').forEach(function(el){" +
-                "if(el.children.length>0)return;" +
-                "var tx=(el.innerText||'').trim().toLowerCase();" +
-                "if(tx==='sponsored'||tx==='sponsored content'||tx==='advertisement'){" +
-                "var box=el.closest('[data-testid*=\"slot\"],[class*=\"Slot\"],[class*=\"nas-\"],aside,section')||el.parentElement;" +
-                "if(box&&box.tagName!=='BODY'&&box.tagName!=='MAIN'&&box.getBoundingClientRect().height<520&&!box.querySelector('video')){" +
-                "box.remove();}}});" +
-                "document.querySelectorAll('div,section,aside,a').forEach(function(el){" +
-                "if(el.querySelector('video,iframe'))return;" +
-                "var t=(el.innerText||'').toLowerCase();" +
-                "var s=window.getComputedStyle(el);" +
-                "var pos=s.position;" +
-                "var z=parseInt(s.zIndex,10)||0;" +
-                "if(t.indexOf('remove sandbox attributes')!==-1||t.indexOf('not a robot')!==-1||" +
-                "((pos==='fixed'||pos==='absolute')&&z>=999&&el.getBoundingClientRect().width>200)){" +
-                "el.remove();" +
-                "}});" +
-                "}catch(e){}}" +
-                "window.__ajCleanAds=clean;" +
-                "clean();setTimeout(clean,1500);setTimeout(clean,3500);" +
-                "})();", null);
-    }
-
-    private void injectDpadNavigation(WebView view) {
-        view.evaluateJavascript(
-                "(function(){" +
-                "if(!document.getElementById('__aj_style')){" +
-                "var st=document.createElement('style');st.id='__aj_style';" +
-                "st.textContent='.__aj_focus{outline:3px solid #D8E8FF !important;outline-offset:2px !important;background-color:rgba(49,76,119,0.55) !important;border-radius:5px !important;}';" +
-                "document.head.appendChild(st);}" +
-                "function vis(){" +
-                "return Array.prototype.slice.call(document.querySelectorAll('iframe,video,a[href],button,input,summary,[role=button],[onclick],[class*=close],[class*=play]')).filter(function(el){" +
-                "var r=el.getBoundingClientRect(),c=window.getComputedStyle(el);" +
-                "return r.width>16&&r.height>16&&c.visibility!=='hidden'&&c.display!=='none';});}" +
-                "function select(el){" +
-                "document.querySelectorAll('.__aj_focus').forEach(function(x){x.classList.remove('__aj_focus');});" +
-                "window.__ajCur=el;" +
-                "if(el){el.classList.add('__aj_focus');try{el.focus({preventScroll:true});}catch(e){}el.scrollIntoView({block:'center',inline:'nearest',behavior:'smooth'});}}" +
-                "window.__ajStep=function(d){" +
-                "if(window.__ajCleanAds)window.__ajCleanAds();" +
-                "var list=vis();if(!list.length){window.scrollBy(0,d*240);return 'SCROLL';}" +
-                "var idx=list.indexOf(window.__ajCur);" +
-                "if(idx===-1){" +
-                "var topY=40;" +
-                "if(location.hash){var h=document.querySelector(location.hash);if(h)topY=Math.max(0,h.getBoundingClientRect().top-20);}" +
-                "idx=0;for(var i=0;i<list.length;i++){if(list[i].getBoundingClientRect().top>=topY){idx=i;break;}}" +
-                "select(list[idx]);return 'OK';}" +
-                "var next=idx+d;" +
-                "if(next<0){if(window.scrollY<=10)return 'TOP';window.scrollBy(0,-240);select(list[0]);return 'TOP_SCROLL';}" +
-                "if(next>=list.length){window.scrollBy(0,240);return 'END';}" +
-                "select(list[next]);return 'OK';};" +
-                "window.__ajClick=function(){" +
-                "var el=window.__ajCur;if(!el)return '';" +
-                "var r=el.getBoundingClientRect();" +
-                "var cx=Math.round(r.left+r.width/2),cy=Math.round(r.top+r.height/2);" +
-                "if(el.tagName==='INPUT'||el.tagName==='TEXTAREA'||el.tagName==='SELECT'||el.isContentEditable){" +
-                "try{el.focus();}catch(e){}" +
-                "var t=(el.type||'').toLowerCase();" +
-                "if(el.tagName==='INPUT'&&(t==='submit'||t==='button'||t==='checkbox'||t==='radio')){el.click();return 'CLICK';}" +
-                "return 'INPUT:'+cx+','+cy;}" +
-                "if(el.tagName==='IFRAME'||el.tagName==='VIDEO'){" +
-                "return 'TAP:'+cx+','+cy;}" +
-                "var h=location.hostname.toLowerCase();" +
-                "if((h==='fmhy.net'||h.endsWith('.fmhy.net')||h==='search.brave.com'||h==='imdb.com'||h.endsWith('.imdb.com')||h==='amazon.com'||h.endsWith('.amazon.com'))&&el.tagName==='A'){" +
-                "el.removeAttribute('target');}" +
-                "el.click();return 'CLICK';};" +
-                "if(!window.__ajCur&&location.hash){setTimeout(function(){window.__ajStep(1);},250);}" +
-                "})();", null);
-    }
-
-    private boolean isBlocked(String host) {
-        if (host == null) return false;
-        String h = host.toLowerCase(Locale.US);
-        for (String blocked : BLOCKED_HOSTS) {
-            if (h.equals(blocked) || h.endsWith("." + blocked)) return true;
-        }
-        return false;
-    }
-
-    private void navigate(String raw) {
-        String value = raw == null ? "" : raw.trim();
-        if (value.isEmpty()) return;
-
-        if (value.contains(" ") || (!value.contains(".") && !value.startsWith("http"))) {
-            try {
-                webView.loadUrl("https://search.brave.com/search?q=" +
-                        URLEncoder.encode(value, "UTF-8"));
-            } catch (Exception e) {
-                webView.loadUrl(HOME);
-            }
-        } else if (value.startsWith("http://") || value.startsWith("https://")) {
-            webView.loadUrl(value);
-        } else {
-            webView.loadUrl("https://" + value);
-        }
-
-        webView.requestFocus();
-    }
-
-    private void toastBlocked() {
-        Toast.makeText(this, "Blocked ad / redirect", Toast.LENGTH_SHORT).show();
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (customView != null) {
-            if (customViewCallback != null) customViewCallback.onCustomViewHidden();
-            fullscreenContainer.removeAllViews();
-            fullscreenContainer.setVisibility(View.GONE);
-            customView = null;
-            customViewCallback = null;
-        } else if (webView.canGoBack()) {
-            webView.goBack();
-        } else {
-            finish();
-        }
-    }
-
-    @Override
-    protected void onPause() {
-        flushCookies();
-        super.onPause();
-    }
-
-    @Override
-    protected void onDestroy() {
-        flushCookies();
-        if (webView != null) {
-            webView.stopLoading();
-            webView.destroy();
-        }
-        super.onDestroy();
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
 }
