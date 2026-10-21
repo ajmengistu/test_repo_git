@@ -1,0 +1,20 @@
+{
+  "snapshot_date": "2026-10-21",
+  "files": [
+    {
+      "file": "easylist.txt",
+      "source": "https://easylist.to/easylist/easylist.txt",
+      "sha256": "77de9e592d437eb87877afd564d7c843730b09720ba71055d8235badfb6e57e8"
+    },
+    {
+      "file": "easyprivacy.txt",
+      "source": "https://easylist.to/easylist/easyprivacy.txt",
+      "sha256": "046887c28462707673d424af77619b1a1938d1d3303e170996b67167a28488eb"
+    },
+    {
+      "file": "adguard-base.txt",
+      "source": "https://filters.adtidy.org/extension/ublock/filters/2.txt",
+      "sha256": "c589fb6b587c7ca30bed6bd6b248c7f60372e8776feff6966562259694564de1"
+    }
+  ]
+}

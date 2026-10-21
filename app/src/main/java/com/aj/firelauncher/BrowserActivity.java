@@ -164,7 +164,7 @@ public class BrowserActivity extends Activity {
         LinearLayout.LayoutParams actionsLp = new LinearLayout.LayoutParams(-1,dp(40));
         actionsLp.topMargin = dp(10);
         toolbar.addView(actions,actionsLp);
-        addButton(actions,"Back","browser-back",this::onBackPressed,0);
+        addButton(actions,"Back","browser-back",() -> { showToolbar(false); if(customView!=null)hideVideo();else if(webView.canGoBack())webView.goBack();else finish(); },0);
         addButton(actions,"Forward","forward",() -> { showToolbar(false); if(webView.canGoForward()) webView.goForward(); },0);
         addButton(actions,"Home","home",() -> load(HOME),0);
         addButton(actions,"Refresh","refresh",() -> { showToolbar(false); webView.reload(); },0);
@@ -269,6 +269,7 @@ public class BrowserActivity extends Activity {
                 showToolbar(false); customView = view; customViewCallback = callback;
                 fullscreenContainer.addView(view,new FrameLayout.LayoutParams(-1,-1));
                 fullscreenContainer.setVisibility(View.VISIBLE); webView.setVisibility(View.INVISIBLE);
+                view.setFocusableInTouchMode(true); view.requestFocus();
                 cursor.setTarget(fullscreenContainer); hideSystemUi();
             }
             @Override public void onHideCustomView() { hideVideo(); }
@@ -342,6 +343,9 @@ public class BrowserActivity extends Activity {
     }
 
     private void injectCosmetics() {
+        if(isFinishing() || isDestroyed()) return;
+        if("Loading".equals(blocker.status())) { webView.postDelayed(this::injectCosmetics,400); return; }
+        if(toolbar.getVisibility()==View.VISIBLE) updateStatus();
         if(allowedSites.containsKey(ContentBlocker.site(pageUrl))) return;
         webView.evaluateJavascript("(function(){try{" +
             "if(window.__ajCosmetics){window.__ajCosmetics();return;}" +

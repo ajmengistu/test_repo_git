@@ -12,7 +12,7 @@ fn engine(text: &str) -> Engine {
 }
 
 fn blocks(engine: &Engine, url: &str, source: &str, kind: &str, method: &str) -> bool {
-    Request::new(url, source, kind, method)
+    Request::new(url, source, kind, &method.to_ascii_lowercase())
         .map(|request| engine.check_network_request(&request).should_block())
         .unwrap_or(false)
 }

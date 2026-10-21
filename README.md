@@ -13,6 +13,16 @@ Minimal near-black home screen for Fire OS 7 and Android TV (Android 6+).
 - Explore retains the exact FMHY and IMDb URLs and adds AJ Browser. Settings retains Fire TV Settings, AJ Browser, NordVPN and installed Home on Fire.
 - The embedded browser and its remote controls, privacy settings, cookies and filtering are unchanged.
 
+## v0.6 browser
+
+Menu shows the compact toolbar; Menu or Back hides it. During browsing, arrows move the visible mouse cursor; hold to accelerate, OK clicks, and the top/bottom edges scroll. Settings also offers scroll mode for long pages. Hover, native dropdowns, text fields/Fire TV keyboard and fullscreen video use WebView mouse input. Back leaves fullscreen/toolbar first, then follows page history and returns to the launcher.
+
+Desktop rendering starts at 90% of WebView's fitted overview. Zoom (75/85/90/100/110/125%), independent text size and desktop/mobile mode are saved per site. Bookmarks and the last 100 unique history entries stay on the device. Home/Forward/Refresh, existing URLs, cookies and player compatibility remain available.
+
+Brave's pinned open-source filtering engine reads bundled EasyList, EasyPrivacy and AdGuard Base snapshots. The toolbar shows blocking availability/count and toggles a temporary site exception. No Acceptable Ads subscription or background list downloads. Standard CSS hiding replaces the old broad overlay removal. See [components, licenses and WebView limitations](THIRD_PARTY_NOTICES.md); this is not Brave's native Shields and cannot block every ad.
+
+Native builds additionally need Rust 1.94.0, the Android NDK and targets `armv7-linux-androideabi` / `aarch64-linux-android`. CI builds this source automatically before Gradle packages the APK. `cargo test --locked --manifest-path native/blocker/Cargo.toml` checks the real engine and bundled lists. Browser regression tests cover cursor input, toolbar navigation, saved settings, bookmarks/history, viewport bounds and video fullscreen callbacks. The debug-only `browser-check.html` fixture supports on-device mouse, dropdown, keyboard, nested scroll and video checks; WebView debugging is enabled only in debuggable builds.
+
 ## Install / update
 
 In Downloader enter:
