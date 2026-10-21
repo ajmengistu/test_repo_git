@@ -7,9 +7,11 @@ import android.net.Uri;
 import android.content.Intent;
 import android.os.Looper;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import android.widget.TextView;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -50,18 +52,29 @@ public class BrowserActivityTest {
     }
     @Test public void dpadMovesCursorAndAcceleratesUntilRelease(){
         BrowserCursor cursor=(BrowserCursor)target("cursor");float before=cursor.cursorX();
+        int[] clicks={0},scrolls={0};
+        web.setOnTouchListener((v,e)->{if(e.getAction()==MotionEvent.ACTION_UP)clicks[0]++;return false;});
+        web.setOnGenericMotionListener((v,e)->{if(e.getAction()==MotionEvent.ACTION_SCROLL)scrolls[0]++;return false;});
         activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_RIGHT));
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250));
         activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_RIGHT));
         float after=cursor.cursorX();assertTrue(after>before);
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(250));assertEquals(after,cursor.cursorX(),0.01f);
         assertTrue(BrowserCursor.speedForHold(900)>BrowserCursor.speedForHold(0));
+        key(KeyEvent.KEYCODE_DPAD_CENTER);assertEquals(1,clicks[0]);
+        cursor.setScrollMode(true);
+        activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_DOWN));
+        activity.dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_DOWN));
+        assertTrue(scrolls[0]>0);
     }
     @Test public void menuAndBackToggleToolbarWithoutLeavingPage(){
         key(KeyEvent.KEYCODE_MENU);assertEquals(View.VISIBLE,target("browser-toolbar").getVisibility());
         assertEquals(View.GONE,target("cursor").getVisibility());
         target("address").dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_RIGHT));
         assertTrue(target("go").hasFocus());
+        target("blocking").performClick();
+        key(KeyEvent.KEYCODE_MENU);
+        assertEquals("Block: Off",((TextView)target("blocking")).getText().toString());
         activity.onBackPressed();assertEquals(View.GONE,target("browser-toolbar").getVisibility());assertFalse(activity.isFinishing());
     }
     @Test public void siteZoomAndFontAreIndependentAndPersist(){
@@ -87,6 +100,8 @@ public class BrowserActivityTest {
     }
     @Test public void browserToolbarFitsViewport(){
         key(KeyEvent.KEYCODE_MENU);
+        root.measure(View.MeasureSpec.makeMeasureSpec(960,View.MeasureSpec.EXACTLY),View.MeasureSpec.makeMeasureSpec(540,View.MeasureSpec.EXACTLY));
+        root.layout(0,0,960,540);
         checkBounds(root,0,0);
     }
     private void checkBounds(View view,int x,int y){

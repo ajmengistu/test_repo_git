@@ -89,8 +89,9 @@ public class BrowserActivity extends Activity {
         configureWebView();
         Uri initial = getIntent() == null ? null : getIntent().getData();
         String url = isAllowedInitialUri(initial) ? initial.toString() : HOME;
-        if (state == null || webView.restoreState(state) == null) load(url);
-        else { pageUrl = webView.getUrl() == null ? HOME : webView.getUrl(); applySite(pageUrl); }
+        String savedUrl = state == null ? url : state.getString("pageUrl", url);
+        if (state == null || webView.restoreState(state) == null) load(savedUrl);
+        else { pageUrl = webView.getUrl() == null ? savedUrl : webView.getUrl(); applySite(pageUrl); }
         webView.requestFocus();
     }
 
@@ -442,7 +443,7 @@ public class BrowserActivity extends Activity {
 
     private boolean keyboardVisible() {
         Rect r=new Rect(); root.getWindowVisibleDisplayFrame(r);
-        return root.getRootView().getHeight()-r.bottom > dp(120);
+        return r.bottom > 0 && root.getRootView().getHeight()-r.bottom > dp(120);
     }
     private void hideKeyboard() {
         InputMethodManager ime=(InputMethodManager)getSystemService(INPUT_METHOD_SERVICE);
@@ -526,7 +527,7 @@ The retained Player compatibility option relaxes iframe sandbox attributes for e
         else if(webView.canGoBack())webView.goBack();
         else finish();
     }
-    @Override protected void onSaveInstanceState(Bundle state){webView.saveState(state);super.onSaveInstanceState(state);}
+    @Override protected void onSaveInstanceState(Bundle state){state.putString("pageUrl",pageUrl);webView.saveState(state);super.onSaveInstanceState(state);}
     @Override protected void onResume(){super.onResume();if(webView!=null)webView.onResume();hideSystemUi();}
     @Override protected void onPause(){cursor.stop();flushCookies();webView.onPause();super.onPause();}
     @Override public void onWindowFocusChanged(boolean focused){super.onWindowFocusChanged(focused);if(!focused&&cursor!=null)cursor.stop();}

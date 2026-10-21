@@ -39,7 +39,7 @@ final class BrowserCursor extends View {
                 if (dy > 0 && y >= getHeight() - zone) wheel(0, -0.13f * elapsed);
                 invalidate();
             }
-            postOnAnimation(this);
+            postDelayed(this, 16);
         }
     };
 
