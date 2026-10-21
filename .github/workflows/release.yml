@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag to build (for example v0.4)
+        description: Release tag to create (v0.6.1)
         required: true
         type: string
 
@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ github.sha }}
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -60,13 +60,13 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
-          git show-ref --verify "refs/tags/$RELEASE_TAG"
+          test "$RELEASE_TAG" = "v0.6.1"
           APK="AJ-Launcher-$RELEASE_TAG.apk"
           cp app/build/outputs/apk/release/app-release.apk "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           sha256sum "$APK" > "$APK.sha256"
           gh release create "$RELEASE_TAG" "$APK" "$APK.sha256" \
-            --verify-tag --title "AJ Launcher $RELEASE_TAG" --notes-file RELEASE_NOTES.md
+            --target "$GITHUB_SHA" --title "AJ Launcher $RELEASE_TAG" --notes-file RELEASE_NOTES.md
           curl --fail --location --retry 5 --retry-all-errors \
             "https://github.com/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$APK" \
             --output "$RUNNER_TEMP/downloaded.apk"
