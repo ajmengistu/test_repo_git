@@ -33,6 +33,14 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      - name: Prepare source-built filter engine
+        run: |
+          rustup toolchain install 1.94.0 --profile minimal
+          rustup default 1.94.0
+          rustup target add armv7-linux-androideabi aarch64-linux-android
+          if [ ! -f native/blocker/Cargo.lock ]; then cargo generate-lockfile --manifest-path native/blocker/Cargo.toml; fi
+          cargo test --locked --manifest-path native/blocker/Cargo.toml
+
       - name: Test, lint and build APKs
         run: gradle :app:testDebugUnitTest :app:lintRelease :app:assembleDebug :app:assembleRelease --console=plain --stacktrace
 
@@ -50,3 +58,4 @@ jobs:
           path: |
             app/build/reports/tests/
             app/build/reports/lint-results-release.*
+            native/blocker/Cargo.lock
