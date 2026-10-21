@@ -6,3 +6,4 @@ local.properties
 *.apk
 *.pem
 native/blocker/target/
+app/src/main/assets/licenses/native-dependencies.txt

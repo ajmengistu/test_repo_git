@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>AJ Browser remote check</title>
+<style>body{margin:24px;font:20px sans-serif;background:#fafafa;color:#17171b}button,input,select{font:20px sans-serif;padding:12px;margin:8px}#hover{display:inline-block;background:#ddd;padding:14px}#hovermenu{display:none}#hover:hover #hovermenu{display:block}#nested{width:350px;height:140px;overflow:auto;border:2px solid}#nested div{height:600px}video{display:block;width:480px;max-width:100%;background:#111}#gap{height:1400px}.ad-test{background:red}</style></head>
+<body><h1>Remote cursor check</h1>
+<button id="click" onclick="this.textContent='Clicked '+(++window.clicks)">Click me</button>
+<input id="entry" placeholder="Type using Fire TV keyboard">
+<select id="select"><option>First choice</option><option>Second choice</option></select>
+<div id="hover">Hover here<div id="hovermenu"><button id="menuitem" onclick="this.textContent='Menu clicked'">Hover menu</button></div></div>
+<p><a id="history" href="#detail">Detail link</a> · <a href="https://www.imdb.com/" target="_blank">Legitimate new-window link</a></p>
+<div id="nested"><div>Nested scrolling area<br>Use scroll mode with cursor here.</div>End of nested area</div>
+<button id="play" onclick="document.querySelector('video').play()">Play video</button>
+<button id="full" onclick="document.querySelector('video').requestFullscreen()">Video fullscreen</button>
+<video id="video" controls playsinline src="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4"></video>
+<div id="gap"></div><h2 id="detail">Detail destination at bottom</h2><button onclick="history.back()">Back</button>
+<script>window.clicks=0;window.events=[];['mousemove','mousedown','mouseup','click','wheel'].forEach(function(type){document.addEventListener(type,function(e){events.push({type:e.type,x:e.clientX,y:e.clientY,trusted:e.isTrusted});if(events.length>50)events.shift();});});</script></body></html>

@@ -7,13 +7,13 @@ static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
 
 fn engine(text: &str) -> Engine {
     let mut filters = FilterSet::new(false);
-    filters.add_filter_list(text, ParseOptions::default());
+    filters.add_filter_list(text.to_owned(), ParseOptions::default());
     Engine::new_with_filter_set(filters)
 }
 
 fn blocks(engine: &Engine, url: &str, source: &str, kind: &str, method: &str) -> bool {
     Request::new(url, source, kind, method)
-        .map(|request| engine.check_network_request(&request).matched)
+        .map(|request| engine.check_network_request(&request).should_block())
         .unwrap_or(false)
 }
 
