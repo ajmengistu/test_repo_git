@@ -32,7 +32,7 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowAlertDialog;
 
 @RunWith(RobolectricTestRunner.class)
-@Config(sdk = 28, qualifiers = "land-w960dp-h540dp-mdpi")
+@Config(sdk = 28, qualifiers = "w960dp-h540dp-land-mdpi")
 public class MainActivityTest {
     private ActivityController<MainActivity> controller;
     private MainActivity activity;
